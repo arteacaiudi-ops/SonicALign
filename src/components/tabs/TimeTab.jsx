@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAudioEngine } from '@/components/audio/AudioEngine';
 
-const SAMPLE_RATE = 48000;
 const TIMEBASES = [2, 4, 6, 8];
 const SPEED_OF_SOUND_BASE = 331.3;
 
@@ -11,17 +10,16 @@ export default function TimeTab() {
   const animFrameRef = useRef(null);
   const [timebase, setTimebase] = useState(4);
   const [frozen, setFrozen] = useState(false);
-  const frozenRef = useRef(false);
   const [frozenOffset, setFrozenOffset] = useState(0);
   const frozenBufferRef = useRef(null);
+  const frozenRef = useRef(false);
 
   const [cursorA, setCursorA] = useState(null);
   const [cursorB, setCursorB] = useState(null);
-  const draggingRef = useRef(null);
-  const [temperature, setTemperature] = useState(25); // Padrão Brasil
-  const speedOfSound = SPEED_OF_SOUND_BASE + 0.606 * temperature;
-
-  const deltaMs = cursorA !== null && cursorB !== null ? Math.abs(cursorB - cursorA) * 1000 : null;
+  const [temperature, setTemperature] = useState(25);
+  
+  const speedOfSound = SPEED_OF_SOUND_BASE + (0.606 * temperature);
+  const deltaMs = (cursorA !== null && cursorB !== null) ? Math.abs(cursorB - cursorA) * 1000 : null;
   const deltaM = deltaMs !== null ? (deltaMs / 1000) * speedOfSound : null;
 
   useEffect(() => {
@@ -60,25 +58,24 @@ export default function TimeTab() {
     
     if (!samples) return;
 
-    // Threshold reduzido para 0.05 para maior sensibilidade no S22
     const threshold = 0.05; 
-    let firstPeak = null, secondPeak = null;
-    let minGap = sr * 0.02; // 20ms de gap mínimo entre pulsos
+    let first = null, second = null;
+    let minGap = sr * 0.02; 
     
     for (let i = 0; i < samples.length; i++) {
       if (Math.abs(samples[i]) > threshold) {
-        if (firstPeak === null) {
-          firstPeak = i / sr;
-          i += minGap; 
-        } else if (secondPeak === null) {
-          secondPeak = i / sr;
+        if (first === null) {
+          first = i / sr;
+          i += Math.floor(minGap); 
+        } else if (second === null) {
+          second = i / sr;
           break;
         }
       }
     }
     
-    if (firstPeak !== null) setCursorA(firstPeak);
-    if (secondPeak !== null) setCursorB(secondPeak);
+    if (first !== null) setCursorA(first);
+    if (second !== null) setCursorB(second);
   }, [getCircularBufferSlice, getSampleRate, timebase, frozenOffset]);
 
   useEffect(() => {
@@ -95,11 +92,9 @@ export default function TimeTab() {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
 
-      // Grid de tempo
       ctx.strokeStyle = '#111';
-      const vDivs = timebase * 2;
-      for (let i = 0; i <= vDivs; i++) {
-        const x = (i / vDivs) * W;
+      for (let i = 0; i <= timebase * 2; i++) {
+        const x = (i / (timebase * 2)) * W;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
       }
 
@@ -124,18 +119,13 @@ export default function TimeTab() {
         ctx.stroke();
       }
 
-      // Desenhar Cursores
       if (cursorA !== null) {
         const x = (cursorA / timebase) * W;
-        ctx.strokeStyle = '#aaff00'; ctx.setLineDash([5, 5]);
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-        ctx.setLineDash([]); ctx.fillStyle = '#aaff00'; ctx.fillText('A', x + 5, 15);
+        ctx.strokeStyle = '#aaff00'; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
       }
       if (cursorB !== null) {
         const x = (cursorB / timebase) * W;
-        ctx.strokeStyle = '#ffee00'; ctx.setLineDash([5, 5]);
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-        ctx.setLineDash([]); ctx.fillStyle = '#ffee00'; ctx.fillText('B', x + 5, 30);
+        ctx.strokeStyle = '#ffee00'; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
       }
 
       animFrameRef.current = requestAnimationFrame(draw);
@@ -145,7 +135,6 @@ export default function TimeTab() {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [isRunning, timebase, frozen, frozenOffset, cursorA, cursorB, getCircularBufferSlice, getSampleRate]);
 
-  // Lógica de Redimensionamento e Touch (Simplificada para o S22)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -162,24 +151,22 @@ export default function TimeTab() {
     const rect = canvasRef.current.getBoundingClientRect();
     const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
     const t = (x / rect.width) * timebase;
-    if (cursorA === null || Math.abs(t - cursorA) > Math.abs(t - (cursorB || 999))) {
-        setCursorB(t);
-    } else {
-        setCursorA(t);
-    }
+    if (cursorA === null) setCursorA(t);
+    else if (cursorB === null) setCursorB(t);
+    else setCursorA(t);
   };
 
   return (
-    <div className="flex flex-col h-full bg-black">
+    <div className="flex flex-col h-full bg-black font-mono">
       <div className="flex items-center gap-2 p-2 border-b border-gray-900">
         <div className="flex gap-1">
           {TIMEBASES.map(t => (
-            <button key={t} onClick={() => setTimebase(t)} className={`px-2 py-1 text-xs border ${timebase === t ? 'border-neon-green text-neon-green' : 'border-gray-800 text-gray-600'}`}>{t}s</button>
+            <button key={t} onClick={() => setTimebase(t)} className={`px-2 py-1 text-[10px] border ${timebase === t ? 'border-neon-green text-neon-green' : 'border-gray-800 text-gray-600'}`}>{t}s</button>
           ))}
         </div>
         <div className="flex-1" />
-        <button onClick={autoMark} className="px-3 py-1 text-xs border border-yellow-600 text-yellow-500">AUTO</button>
-        <button onClick={toggleFreeze} className={`px-3 py-1 text-xs border ${frozen ? 'border-red-500 text-red-500' : 'border-gray-700 text-gray-500'}`}>{frozen ? 'LIVE' : 'FREEZE'}</button>
+        <button onClick={autoMark} className="px-3 py-1 text-[10px] border border-yellow-600 text-yellow-500">AUTO</button>
+        <button onClick={toggleFreeze} className={`px-3 py-1 text-[10px] border ${frozen ? 'border-red-500 text-red-500' : 'border-gray-700 text-gray-500'}`}>{frozen ? 'LIVE' : 'FREEZE'}</button>
       </div>
 
       <div className="flex-1 relative" onMouseDown={handleInteraction} onTouchStart={handleInteraction}>
@@ -188,9 +175,9 @@ export default function TimeTab() {
 
       <div className="p-4 bg-gray-950 border-t border-gray-900 flex justify-around">
         <div className="text-center">
-            <p className="text-[10px] text-gray-600">Δ DELAY</p>
-            <p className="text-2xl font-bold text-neon-yellow">{deltaMs ? deltaMs.toFixed(2) : '--'} ms</p>
-            <p className="text-xs text-gray-500">{deltaM ? deltaM.toFixed(2) + ' m' : ''}</p>
+            <p className="text-[10px] text-gray-600 tracking-widest">Δ DELAY</p>
+            <p className="text-2xl font-bold text-[#ffee00]">{deltaMs ? deltaMs.toFixed(2) : '--'} ms</p>
+            <p className="text-[10px] text-gray-500">{deltaM ? deltaM.toFixed(2) + ' m' : ''}</p>
         </div>
       </div>
     </div>
