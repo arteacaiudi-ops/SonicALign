@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 80 100% 50%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 50%;
+    --accent: 54 100% 50%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 80% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 15%;
+    --input: 0 0% 10%;
+    --ring: 80 100% 50%;
+    --radius: 0.5rem;
+    --neon-green: #aaff00;
+    --neon-yellow: #ffee00;
+    --neon-blue: #00c8ff;
+    --neon-red: #ff3030;
+    --neon-orange: #ff8c00;
+    --panel-bg: #0a0a0a;
+    --panel-border: #1a1a1a;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+
+  .font-mono-tech {
+    font-family: 'Share Tech Mono', monospace;
+  }
+}
+
+/* Neon glow effects */
+.neon-green { color: var(--neon-green); }
+.neon-yellow { color: var(--neon-yellow); }
+.neon-blue { color: var(--neon-blue); }
+.neon-red { color: var(--neon-red); }
+
+.glow-green {
+  text-shadow: 0 0 8px var(--neon-green), 0 0 20px var(--neon-green);
+}
+.glow-yellow {
+  text-shadow: 0 0 8px var(--neon-yellow), 0 0 20px var(--neon-yellow);
+}
+.glow-blue {
+  text-shadow: 0 0 8px var(--neon-blue), 0 0 20px var(--neon-blue);
+}
+
+.border-neon-green { border-color: var(--neon-green); }
+.border-neon-yellow { border-color: var(--neon-yellow); }
+.border-neon-blue { border-color: var(--neon-blue); }
+
+.bg-neon-green { background-color: var(--neon-green); }
+.bg-neon-yellow { background-color: var(--neon-yellow); }
+
+.btn-neon {
+  @apply rounded-lg font-semibold transition-all duration-150 active:scale-95;
+  border: 1px solid var(--neon-green);
+  color: var(--neon-green);
+  background: transparent;
+  padding: 10px 18px;
+  box-shadow: 0 0 8px rgba(170, 255, 0, 0.3);
+}
+
+.btn-neon:active {
+  background: rgba(170, 255, 0, 0.1);
+  box-shadow: 0 0 16px rgba(170, 255, 0, 0.5);
+}
+
+.btn-neon-yellow {
+  @apply rounded-lg font-semibold transition-all duration-150 active:scale-95;
+  border: 1px solid var(--neon-yellow);
+  color: var(--neon-yellow);
+  background: transparent;
+  padding: 10px 18px;
+  box-shadow: 0 0 8px rgba(255, 238, 0, 0.3);
+}
+
+.btn-neon-active {
+  background: rgba(170, 255, 0, 0.15) !important;
+  box-shadow: 0 0 12px rgba(170, 255, 0, 0.6) !important;
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+
+/* Canvas crisp */
+canvas { image-rendering: pixelated; }
+
+/* Prevent zoom on double tap */
+* { touch-action: manipulation; }
