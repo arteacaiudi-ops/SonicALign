@@ -2,11 +2,17 @@ import React, { createContext, useContext, useRef, useState, useCallback, useEff
 
 const AudioEngineContext = createContext(null);
 
-export const useAudioEngine = () => useContext(AudioEngineContext);
+export const useAudioEngine = () => {
+  const context = useContext(AudioEngineContext);
+  if (!context) {
+    throw new Error('useAudioEngine must be used within an AudioEngineProvider');
+  }
+  return context;
+};
 
 const FFT_SIZE = 4096;
 const SAMPLE_RATE = 48000;
-const BUFFER_DURATION = 8; // seconds circular buffer
+const BUFFER_DURATION = 8; 
 
 export function AudioEngineProvider({ children }) {
   const [isRunning, setIsRunning] = useState(false);
@@ -25,10 +31,6 @@ export function AudioEngineProvider({ children }) {
   const BUFFER_SIZE = SAMPLE_RATE * BUFFER_DURATION;
   const processorRef = useRef(null);
 
-  useEffect(() => {
-    loadDevices();
-  }, []);
-
   const loadDevices = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -38,6 +40,10 @@ export function AudioEngineProvider({ children }) {
       console.error("Erro ao listar dispositivos", e);
     }
   };
+
+  useEffect(() => {
+    loadDevices();
+  }, []);
 
   const start = useCallback(async (deviceId) => {
     if (isRunning) return;
@@ -51,7 +57,6 @@ export function AudioEngineProvider({ children }) {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-          // Constraints específicas para Android/Chrome ignorarem processamento
           googEchoCancellation: false,
           googAutoGainControl: false,
           googNoiseSuppression: false,
@@ -73,7 +78,6 @@ export function AudioEngineProvider({ children }) {
         latencyHint: 'interactive',
       });
       
-      // Essencial para Mobile: Retomar o contexto após interação
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
@@ -114,7 +118,7 @@ export function AudioEngineProvider({ children }) {
       setIsStarting(false);
       await loadDevices();
     } catch (err) {
-      setError(err.message || 'Acesso ao microfone negado');
+      setError(err.message || 'Acesso negado');
       setIsStarting(false);
     }
   }, [isRunning, BUFFER_SIZE]);
