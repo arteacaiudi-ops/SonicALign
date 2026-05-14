@@ -14,20 +14,15 @@ export function AudioEngineProvider({ children }) {
   const [error, setError] = useState(null);
   const [inputDevices, setInputDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('default');
-  const [micCalibration, setMicCalibration] = useState(null); // float32array offsets per band
+  const [micCalibration, setMicCalibration] = useState(null);
 
-  // Audio nodes refs
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
   const sourceRef = useRef(null);
   const streamRef = useRef(null);
-
-  // Circular time-domain buffer (8s @ 48kHz)
   const circularBufferRef = useRef(null);
   const bufferWriteIdxRef = useRef(0);
   const BUFFER_SIZE = SAMPLE_RATE * BUFFER_DURATION;
-
-  // Script processor for raw PCM capture
   const processorRef = useRef(null);
 
   useEffect(() => {
@@ -36,14 +31,11 @@ export function AudioEngineProvider({ children }) {
 
   const loadDevices = async () => {
     try {
-      // Need a temporary stream to trigger permission first
-      const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
-      tmp.getTracks().forEach(t => t.stop());
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(d => d.kind === 'audioinput');
       setInputDevices(audioInputs);
-    } catch {
-      // ignore — user will be asked on start
+    } catch (e) {
+      console.error("Erro ao listar dispositivos", e);
     }
   };
 
@@ -59,10 +51,14 @@ export function AudioEngineProvider({ children }) {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
+          // Constraints específicas para Android/Chrome ignorarem processamento
           googEchoCancellation: false,
           googAutoGainControl: false,
           googNoiseSuppression: false,
           googHighpassFilter: false,
+          googNoiseSuppression2: false,
+          googEchoCancellation2: false,
+          googAutoGainControl2: false,
           latency: 0,
           channelCount: 1,
           sampleRate: SAMPLE_RATE,
@@ -76,6 +72,12 @@ export function AudioEngineProvider({ children }) {
         sampleRate: SAMPLE_RATE,
         latencyHint: 'interactive',
       });
+      
+      // Essencial para Mobile: Retomar o contexto após interação
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      
       audioCtxRef.current = ctx;
 
       const analyser = ctx.createAnalyser();
@@ -86,15 +88,15 @@ export function AudioEngineProvider({ children }) {
       const source = ctx.createMediaStreamSource(stream);
       sourceRef.current = source;
 
-      // Circular buffer init
       circularBufferRef.current = new Float32Array(BUFFER_SIZE);
       bufferWriteIdxRef.current = 0;
 
-      // ScriptProcessor to fill circular buffer
       const processor = ctx.createScriptProcessor(2048, 1, 1);
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
         const buf = circularBufferRef.current;
+        if (!buf) return;
+        
         let idx = bufferWriteIdxRef.current;
         for (let i = 0; i < input.length; i++) {
           buf[idx % BUFFER_SIZE] = input[i];
@@ -110,13 +112,12 @@ export function AudioEngineProvider({ children }) {
 
       setIsRunning(true);
       setIsStarting(false);
-
       await loadDevices();
     } catch (err) {
-      setError(err.message || 'Mic access denied');
+      setError(err.message || 'Acesso ao microfone negado');
       setIsStarting(false);
     }
-  }, [isRunning]);
+  }, [isRunning, BUFFER_SIZE]);
 
   const stop = useCallback(() => {
     if (streamRef.current) {
@@ -146,14 +147,6 @@ export function AudioEngineProvider({ children }) {
     return data;
   }, []);
 
-  const getTimeDomainData = useCallback(() => {
-    if (!analyserRef.current) return null;
-    const data = new Float32Array(analyserRef.current.fftSize);
-    analyserRef.current.getFloatTimeDomainData(data);
-    return data;
-  }, []);
-
-  // Returns a slice of the circular buffer (samples from writeHead - count to writeHead)
   const getCircularBufferSlice = useCallback((count) => {
     if (!circularBufferRef.current) return null;
     const buf = circularBufferRef.current;
@@ -165,14 +158,9 @@ export function AudioEngineProvider({ children }) {
       result[i] = buf[readIdx];
     }
     return result;
-  }, []);
+  }, [BUFFER_SIZE]);
 
-  const getSampleRate = useCallback(() => {
-    return audioCtxRef.current ? audioCtxRef.current.sampleRate : SAMPLE_RATE;
-  }, []);
-
-  const getFftSize = () => FFT_SIZE;
-  const getBufferDuration = () => BUFFER_DURATION;
+  const getSampleRate = useCallback(() => audioCtxRef.current?.sampleRate || SAMPLE_RATE, []);
 
   return (
     <AudioEngineContext.Provider value={{
@@ -180,9 +168,9 @@ export function AudioEngineProvider({ children }) {
       inputDevices, selectedDevice, setSelectedDevice,
       micCalibration, setMicCalibration,
       start, stop,
-      getFrequencyData, getTimeDomainData,
+      getFrequencyData,
       getCircularBufferSlice,
-      getSampleRate, getFftSize, getBufferDuration,
+      getSampleRate,
       analyserRef, audioCtxRef,
     }}>
       {children}
