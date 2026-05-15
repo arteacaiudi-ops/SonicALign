@@ -22,6 +22,17 @@ export function AudioEngineProvider({ children }) {
   const bufferWriteIdxRef = useRef(0);
   const activeSignalRef = useRef(null);
 
+  // Inicializa ou recupera o contexto de áudio sem precisar do microfone
+  const ensureContext = useCallback(async () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      await audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  }, []);
+
   const stopActiveSignal = useCallback(() => {
     if (activeSignalRef.current) {
       if (activeSignalRef.current.stop) activeSignalRef.current.stop();
@@ -32,17 +43,15 @@ export function AudioEngineProvider({ children }) {
   const loadDevices = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const inputs = devices.filter(d => d.kind === 'audioinput');
-      setInputDevices(inputs);
+      setInputDevices(devices.filter(d => d.kind === 'audioinput'));
     } catch (e) { console.error("Erro dispositivos", e); }
   }, []);
 
   useEffect(() => { loadDevices(); }, [loadDevices]);
 
-  const playReferenceSignal = useCallback((type, interval = 1) => {
-    if (!audioCtxRef.current) return null;
+  const playReferenceSignal = useCallback(async (type, interval = 1) => {
+    const ctx = await ensureContext();
     stopActiveSignal();
-    const ctx = audioCtxRef.current;
     
     if (type === 'pink') {
       const bufferSize = 2 * ctx.sampleRate;
@@ -82,18 +91,16 @@ export function AudioEngineProvider({ children }) {
       activeSignalRef.current = { stop: () => clearInterval(timer) };
       return activeSignalRef.current;
     }
-  }, [invertPolarity, stopActiveSignal]);
+  }, [invertPolarity, stopActiveSignal, ensureContext]);
 
   const start = useCallback(async (deviceId) => {
     if (isRunning) return;
+    const ctx = await ensureContext();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
       streamRef.current = stream;
-      const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-      if (ctx.state === 'suspended') await ctx.resume();
-      audioCtxRef.current = ctx;
 
       const gainNode = ctx.createGain();
       gainNode.gain.value = inputGain;
@@ -122,12 +129,11 @@ export function AudioEngineProvider({ children }) {
       processor.connect(ctx.destination);
       setIsRunning(true);
     } catch (err) { alert("Erro ao acessar microfone: " + err.message); }
-  }, [isRunning, inputGain]);
+  }, [isRunning, inputGain, ensureContext]);
 
   const stop = useCallback(() => {
     stopActiveSignal();
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    if (audioCtxRef.current) audioCtxRef.current.close();
     setIsRunning(false);
   }, [stopActiveSignal]);
 
