@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AudioEngineProvider, useAudioEngine } from '@/components/audio/AudioEngine';
+import { APP_VERSION } from '@/lib/app-params';
 import TimeTab from '@/components/tabs/TimeTab';
 import RtaTab from '@/components/tabs/RtaTab';
 import GenTab from '@/components/tabs/GenTab';
@@ -24,6 +25,7 @@ function AppShell() {
         <div>
           <span className="font-mono-tech text-sm neon-green glow-green tracking-widest">AUDIO-ALIGN</span>
           <span className="font-mono-tech text-sm text-gray-600 ml-1">PRO</span>
+          <span className="text-xs font-mono opacity-50 ml-2">v{APP_VERSION}</span>
         </div>
         <div className="flex items-center gap-2">
           {error && (
