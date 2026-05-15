@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAudioEngine } from '@/components/audio/AudioEngine';
 import RollingGraph from '../audio/RollingGraph';
 import { Play, Square, LayoutGrid, TrendingDown, BarChart3, Waves, SlidersHorizontal, Activity, Crosshair, AlertCircle, CheckCircle } from 'lucide-react';
@@ -8,9 +8,10 @@ export default function AmbienceTab() {
   const [activeView, setActiveView] = useState('summary');
   const [threshold, setThreshold] = useState(0.25);
   const [metrics, setMetrics] = useState({ rt60: null, c50: null });
-  const [isListening, setIsListening] = useState(false);
+  const [sweepState, setSweepState] = useState('idle'); // idle, listening, recording, done
   const [liveData, setLiveData] = useState(new Float32Array(0));
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const timerRef = useRef(null);
 
   const VIEWS = [
     { id: 'summary', label: 'Resumo', icon: LayoutGrid },
@@ -28,22 +29,36 @@ export default function AmbienceTab() {
 
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
-    let pulseIdx = -1;
-    for (let i = samples.length - 1; i > sr; i--) {
-      if (Math.abs(samples[i]) > threshold && Math.abs(samples[i-100]) < threshold * 0.3) {
-        pulseIdx = i; break;
+    // Procura o final do sweep (queda brusca de energia após os 5 segundos)
+    let sweepEndIdx = -1;
+    for (let i = samples.length - Math.floor(sr * 0.1); i > sr; i--) {
+      if (Math.abs(samples[i]) > threshold * 0.6 && Math.abs(samples[i+100] || 0) < threshold * 0.2) {
+        sweepEndIdx = i; break;
       }
     }
-    if (pulseIdx !== -1 && pulseIdx < samples.length - sr) {
-      const fiftyMs = Math.floor(sr * 0.05);
-      let early = 0, late = 0;
-      for (let i = pulseIdx; i < pulseIdx + fiftyMs; i++) early += samples[i] ** 2;
-      for (let i = pulseIdx + fiftyMs; i < pulseIdx + sr; i++) late += samples[i] ** 2;
-      if (early > 0) {
-        setMetrics({ c50: 10 * Math.log10(early / (late || 0.00001)), rt60: 0.3 + (late / early) * 15 });
-        setIsListening(false);
-        stop(); // Para a escuta após sucesso ("One-Shot")
-      }
+    
+    // Se não encontrou uma queda clara, assume um ponto seguro 1.5s antes do final do buffer de 8s
+    if (sweepEndIdx === -1) sweepEndIdx = samples.length - Math.floor(sr * 1.5);
+
+    const fiftyMs = Math.floor(sr * 0.05);
+    let early = 0, late = 0;
+    
+    // Energia Inicial (Direta)
+    for (let i = sweepEndIdx - fiftyMs; i < sweepEndIdx + fiftyMs; i++) {
+        if(samples[i]) early += samples[i] ** 2;
+    }
+    // Energia Tardia (Reverberação)
+    for (let i = sweepEndIdx + fiftyMs; i < sweepEndIdx + (sr * 1.5); i++) {
+        if(samples[i]) late += samples[i] ** 2;
+    }
+    
+    if (early > 0) {
+      setMetrics({ 
+        c50: 10 * Math.log10(early / (late || 0.00001)), 
+        rt60: 0.3 + (late / early) * 12 // Ajuste do multiplicador
+      });
+      setSweepState('done');
+      stop(); 
     }
   }, [getSampleRate, threshold, stop]);
 
@@ -52,15 +67,46 @@ export default function AmbienceTab() {
     const interval = setInterval(() => {
       const samples = getCircularBufferSlice(getSampleRate() * 8); 
       setLiveData(samples);
-      if (isListening) processAcoustics(samples);
+
+      // Estado 1: Escutando (Aguardando o bip de sincronia inicial)
+      if (sweepState === 'listening') {
+        const recentSamples = getCircularBufferSlice(getSampleRate()); // Olha apenas o último segundo
+        let triggered = false;
+        for (let i = 0; i < recentSamples.length; i++) {
+          if (Math.abs(recentSamples[i]) > threshold) { triggered = true; break; }
+        }
+        
+        if (triggered) {
+          setSweepState('recording');
+          // Estado 2: Gravando o Sweep + Cauda de Reverb. Espera 6.5 segundos completos.
+          timerRef.current = setTimeout(() => {
+             const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
+             processAcoustics(finalSamples);
+          }, 6500); 
+        }
+      }
     }, 150);
-    return () => clearInterval(interval);
-  }, [isRunning, isListening, getCircularBufferSlice, getSampleRate, processAcoustics]);
+
+    return () => {
+        clearInterval(interval);
+        if(timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, processAcoustics, threshold]);
+
+  const toggleListening = () => {
+      if (sweepState === 'listening' || sweepState === 'recording') {
+          setSweepState('idle');
+          if(timerRef.current) clearTimeout(timerRef.current);
+      } else {
+          setSweepState('listening');
+          setMetrics({ rt60: null, c50: null });
+      }
+  };
 
   return (
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
       <div className="flex bg-zinc-950 border-b border-zinc-900 overflow-x-auto no-scrollbar px-1 py-1 gap-1 shrink-0">
-        <button onClick={() => { setIsListening(false); isRunning ? stop() : start(selectedDevice); }} className={`w-16 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}>
+        <button onClick={() => { setSweepState('idle'); isRunning ? stop() : start(selectedDevice); }} className={`w-20 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}>
           {isRunning ? 'STOP' : 'INICIAR ANÁLISE'}
         </button>
         {VIEWS.map(v => (
@@ -68,22 +114,30 @@ export default function AmbienceTab() {
         ))}
       </div>
 
-      {isListening && (
+      {/* FEEDBACK DE ESTADO DO SWEEP */}
+      {sweepState === 'listening' && (
         <div className="bg-neon-blue/20 p-3 flex items-center gap-3 animate-pulse border-b border-neon-blue/30">
           <AlertCircle className="text-neon-blue" size={20}/>
-          <div className="text-[10px] text-white font-bold leading-tight">NÃO MOVA O DISPOSITIVO.<br/>DISPARE O SINAL E AGUARDE A FINALIZAÇÃO.</div>
+          <div className="text-[10px] text-white font-bold leading-tight">AGUARDANDO SINAL...<br/>DISPARE O SWEEP E NÃO MOVA O DISPOSITIVO.</div>
+        </div>
+      )}
+      
+      {sweepState === 'recording' && (
+        <div className="bg-red-500/20 p-3 flex items-center gap-3 animate-pulse border-b border-red-500/30">
+          <Activity className="text-red-500" size={20}/>
+          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP...<br/>AGUARDE 6 SEGUNDOS PARA FINALIZAÇÃO.</div>
         </div>
       )}
 
-      {metrics.rt60 && !isListening && !isRunning && (
+      {sweepState === 'done' && (
         <div className="bg-neon-green/20 p-2 flex items-center gap-2 border-b border-neon-green/30 text-[10px] text-neon-green font-black">
-            <CheckCircle size={14}/> LEITURA REGISTRADA.
+            <CheckCircle size={14}/> LEITURA FINALIZADA.
         </div>
       )}
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-7 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900 shrink-0">
-          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} />
+          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} disabled={sweepState === 'recording'}/>
         </div>
 
         <div className="flex-1 flex flex-col p-2 gap-2 overflow-y-auto">
@@ -92,14 +146,15 @@ export default function AmbienceTab() {
           </div>
 
           <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl flex justify-between items-center shrink-0">
-             <button onClick={handleAutoGain} className={`p-2 rounded border border-zinc-800 ${isCalibrating ? 'text-neon-blue animate-spin' : 'text-zinc-400'}`}><Crosshair size={14}/></button>
+             <button onClick={handleAutoGain} className={`p-2 rounded border border-zinc-800 ${isCalibrating ? 'text-neon-blue animate-spin' : 'text-zinc-400'}`} disabled={sweepState === 'recording'}><Crosshair size={14}/></button>
              <button 
-                onClick={() => setIsListening(!isListening)} 
-                className={`px-4 py-2 rounded-lg font-black text-[9px] border transition-all ${isListening ? 'bg-neon-green text-black border-neon-green' : 'border-neon-blue text-neon-blue'}`}
+                onClick={toggleListening} 
+                className={`px-4 py-2 rounded-lg font-black text-[9px] border transition-all ${(sweepState === 'listening' || sweepState === 'recording') ? 'bg-neon-green text-black border-neon-green' : 'border-neon-blue text-neon-blue'}`}
+                disabled={sweepState === 'recording'}
              >
-                {isListening ? 'OUVINDO SWEEP...' : 'AGUARDAR SINAL'}
+                {(sweepState === 'listening' || sweepState === 'recording') ? 'CANCELAR ESCUTA' : 'AGUARDAR SINAL'}
              </button>
-             <button onClick={() => playReferenceSignal('sweep')} className="p-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px]"><Play size={10} className="inline mr-1"/> EMITIR SINAL</button>
+             <button onClick={() => playReferenceSignal('sweep')} className="p-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white" disabled={sweepState === 'recording'}><Play size={10} className="inline mr-1"/> EMITIR SINAL</button>
           </div>
 
           {activeView === 'summary' && (
