@@ -13,7 +13,6 @@ export const TARGET_CURVES = {
   OUTDOOR: { label: "OUTDOOR PA", points: [[20, 9], [120, 9], [1000, 0], [10000, 3], [20000, 0]] }
 };
 
-export const DEFAULT_TEMP = 25;
 const isNode = typeof window === 'undefined';
 const windowObj = isNode ? { localStorage: new Map() } : window;
 const storage = windowObj.localStorage;
