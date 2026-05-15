@@ -5,7 +5,7 @@ import { Play, Square, Crosshair, BarChart2 } from 'lucide-react';
 
 export default function RtaTab() {
   const { isRunning, getFrequencyData, playReferenceSignal, setInputGain, inputGain } = useAudioEngine();
-  const [selectedCurve, setSelectedCurve] = useState('LIVE');
+  const [selectedCurve, setSelectedCurve] = useState('FLAT');
   const [isPinkRunning, setIsPinkRunning] = useState(false);
   const canvasRef = useRef(null);
   const pinkRef = useRef(null);
