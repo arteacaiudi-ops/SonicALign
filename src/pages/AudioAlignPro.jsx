@@ -6,7 +6,7 @@ import RtaTab from '@/components/tabs/RtaTab';
 import GenTab from '@/components/tabs/GenTab';
 import AmbienceTab from '@/components/tabs/AmbienceTab';
 import SettingsTab from '@/components/tabs/SettingsTab';
-import { Waves, BarChart2, Radio, Settings, Mic2, Slider } from 'lucide-react';
+import { Waves, BarChart2, Radio, Settings, Mic2, Plus, Minus } from 'lucide-react';
 
 function AppShell() {
   const [activeTab, setActiveTab] = useState('time');
@@ -23,30 +23,38 @@ function AppShell() {
   return (
     <div className="flex flex-col h-screen w-screen bg-black overflow-hidden lg:flex-row">
       <div className="flex flex-col flex-1 h-full overflow-hidden">
-        {/* Header com Ajuste de Ganho */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-900 bg-zinc-950">
-          <div className="flex flex-col">
-            <span className="font-bold text-xs neon-green">AUDIO-ALIGN PRO</span>
-            <span className="text-[8px] text-zinc-600 font-mono">v{APP_VERSION}</span>
+        {/* Header Ergonômico v1.0.3a */}
+        <div className="flex flex-col border-b border-zinc-900 bg-zinc-950 p-2 gap-2">
+          <div className="flex items-center justify-between px-2">
+            <div className="flex flex-col">
+              <span className="font-black text-[10px] neon-green italic">SONICALIGN PRO</span>
+              <span className="text-[8px] text-zinc-600 font-mono tracking-tighter">ENGINE v{APP_VERSION}</span>
+            </div>
+            <button 
+              onClick={() => isRunning ? stop() : start()} 
+              className={`px-6 py-2 rounded border-2 font-black text-xs transition-all ${isRunning ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-neon-green text-neon-green shadow-[0_0_10px_rgba(0,255,0,0.2)]'}`}
+            >
+              {isRunning ? '■ PARAR' : '▶ ANALISAR'}
+            </button>
           </div>
 
-          <div className="flex items-center gap-4 flex-1 justify-center max-w-xs mx-4">
-            <span className="text-[9px] text-zinc-500 font-bold">GAIN</span>
-            <input 
-              type="range" min="0.1" max="5" step="0.1" 
-              value={inputGain} 
-              onChange={(e) => setInputGain(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-zinc-800 rounded-lg accent-neon-green"
-            />
-            <span className="text-[9px] text-neon-green font-mono w-6">{inputGain.toFixed(1)}</span>
+          {/* Slider de Ganho Grande para Celular */}
+          <div className="flex items-center gap-3 bg-black/40 p-2 rounded-lg border border-zinc-900/50">
+            <button onClick={() => setInputGain(Math.max(0.1, inputGain - 0.1))} className="p-2 text-zinc-500"><Minus size={16}/></button>
+            <div className="flex-1 flex flex-col gap-1">
+              <input 
+                type="range" min="0.1" max="10" step="0.1" 
+                value={inputGain} 
+                onChange={(e) => setInputGain(parseFloat(e.target.value))}
+                className="w-full h-4 bg-zinc-800 rounded-full accent-neon-green"
+              />
+              <div className="flex justify-between text-[8px] text-zinc-600 font-bold uppercase">
+                <span>Ganho de Entrada</span>
+                <span className="text-neon-green">{inputGain.toFixed(1)}x</span>
+              </div>
+            </div>
+            <button onClick={() => setInputGain(Math.min(10, inputGain + 0.1))} className="p-2 text-zinc-500"><Plus size={16}/></button>
           </div>
-
-          <button 
-            onClick={() => isRunning ? stop() : start()} 
-            className={`px-4 py-2 rounded-md text-[10px] font-bold transition-all border ${isRunning ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-neon-green text-neon-green hover:bg-green-500/10'}`}
-          >
-            {isRunning ? '■ PARAR' : '▶ ANALISAR'}
-          </button>
         </div>
 
         <div className="flex-1 relative overflow-hidden">
@@ -57,12 +65,11 @@ function AppShell() {
           {activeTab === 'set' && <SettingsTab />}
         </div>
 
-        {/* Nav */}
-        <div className="flex border-t border-zinc-900 bg-black pb-safe">
+        <div className="flex border-t border-zinc-900 bg-black">
           {TABS.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-colors ${activeTab === tab.id ? 'text-neon-green bg-zinc-900/50' : 'text-zinc-600'}`}>
-              <tab.icon size={20} />
-              <span className="text-[8px] font-black tracking-tighter">{tab.label}</span>
+              <tab.icon size={22} />
+              <span className="text-[8px] font-black">{tab.label}</span>
             </button>
           ))}
         </div>
