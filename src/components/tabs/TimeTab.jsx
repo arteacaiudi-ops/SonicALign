@@ -29,32 +29,31 @@ export default function TimeTab() {
       const sr = getSampleRate();
       const W = canvas.width = canvas.offsetWidth;
       const H = canvas.height = canvas.offsetHeight;
+      const windowSamples = sr * timeWindow;
       
-      const samples = isFrozen ? frozenData : getCircularBufferSlice(sr * timeWindow);
+      const samples = isFrozen ? frozenData : getCircularBufferSlice(windowSamples);
       
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, W, H);
       
       // Grid
       ctx.strokeStyle = '#111';
-      ctx.lineWidth = 1;
       for(let i=1; i<10; i++){ ctx.beginPath(); ctx.moveTo(W*i/10, 0); ctx.lineTo(W*i/10, H); ctx.stroke(); }
 
-      // Threshold
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-      const ty = H/2 - (threshold * H/2);
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
-      ctx.setLineDash([]);
-
       if (samples) {
+        // Linha de Threshold
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+        const ty = H/2 - (threshold * H/2);
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
+        ctx.setLineDash([]);
+
         ctx.beginPath();
         ctx.strokeStyle = isFrozen ? '#00ffff' : '#00ff00';
         ctx.lineWidth = 2;
         
-        // Lógica de desenho estável: Mapeamento direto
         const step = samples.length / W;
-        let localPicos = [];
+        let picos = [];
 
         for (let x = 0; x < W; x++) {
           const sIdx = Math.floor(x * step);
@@ -63,17 +62,15 @@ export default function TimeTab() {
           
           if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
 
-          if (!isFrozen && Math.abs(val) > threshold && localPicos.length < 2) {
-             if (localPicos.length === 0 || (sIdx - localPicos[0]) > sr * 0.05) {
-                localPicos.push(sIdx);
-             }
+          if (!isFrozen && Math.abs(val) > threshold && picos.length < 2) {
+             if (picos.length === 0 || (sIdx - picos[0]) > sr * 0.05) picos.push(sIdx);
           }
         }
         ctx.stroke();
 
-        if (!isFrozen && localPicos.length === 2) {
-           const ms = ((localPicos[1] - localPicos[0]) / sr) * 1000;
-           setMarkers(localPicos);
+        if (!isFrozen && picos.length === 2) {
+           const ms = ((picos[1] - picos[0]) / sr) * 1000;
+           setMarkers(picos);
            setDelayInfo({ ms, m: ms * 0.343 });
         }
 
@@ -91,18 +88,16 @@ export default function TimeTab() {
 
   return (
     <div className="flex flex-col h-full bg-black font-mono">
-      <div className="bg-zinc-950 p-2 border-b border-zinc-900 flex justify-between items-center gap-2 shadow-xl">
-        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`px-4 py-2 rounded-md font-black text-[10px] border shrink-0 transition-all ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-green/10 border-neon-green text-neon-green'}`}>
-          {isRunning ? 'PARAR MIC' : 'ANALISAR'}
+      <div className="bg-zinc-950 p-2 border-b border-zinc-900 flex justify-between items-center gap-2">
+        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`px-4 py-2 rounded-md font-black text-[10px] border shrink-0 ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-green/10 border-neon-green text-neon-green'}`}>
+          {isRunning ? 'STOP MIC' : 'ANALISAR'}
         </button>
-        
-        <div className="flex gap-4 shrink-0 bg-black/40 px-3 py-1 rounded border border-zinc-800">
+        <div className="flex gap-4 bg-black/40 px-3 py-1 rounded border border-zinc-800 shrink-0">
           <div className="flex flex-col"><span className="text-[7px] text-zinc-500">DELTA</span><span className="text-neon-yellow text-xs font-black">{delayInfo.ms.toFixed(2)}ms</span></div>
           <div className="flex flex-col border-l border-zinc-800 pl-3"><span className="text-[7px] text-zinc-500">DIST</span><span className="text-neon-blue text-xs font-black">{delayInfo.m.toFixed(2)}m</span></div>
         </div>
-
-        <div className="flex gap-1 ml-auto">
-          <select value={timeWindow} onChange={(e)=>setTimeWindow(parseInt(e.target.value))} className="bg-zinc-900 text-[10px] text-white p-1 rounded border border-zinc-800 outline-none">
+        <div className="flex gap-1 ml-auto shrink-0">
+          <select value={timeWindow} onChange={(e)=>setTimeWindow(parseInt(e.target.value))} className="bg-zinc-900 text-[10px] text-white p-1 rounded border border-zinc-800">
             {[2, 4, 6, 8].map(t => <option key={t} value={t}>{t}s</option>)}
           </select>
           <button onClick={() => { if(!isFrozen) setFrozenData(getCircularBufferSlice(getSampleRate() * timeWindow)); setIsFrozen(!isFrozen); }} className={`p-2 rounded border ${isFrozen ? 'bg-cyan-500 border-cyan-500 text-black' : 'border-zinc-800 text-zinc-400'}`}><Snowflake size={14}/></button>
@@ -110,7 +105,6 @@ export default function TimeTab() {
           <button onClick={togglePulse} className={`px-3 py-1 rounded border text-[9px] font-black ${isPulseRunning ? 'bg-red-500 text-white' : 'text-neon-blue border-neon-blue'}`}>{isPulseRunning ? 'STOP' : 'PULSE'}</button>
         </div>
       </div>
-
       <div className="flex-1 flex overflow-hidden">
         <div className="w-10 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900">
           <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} />
