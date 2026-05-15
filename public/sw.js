@@ -1,3 +1,4 @@
+// Version: 1.0.2
 const CACHE_NAME = 'audio-align-pro-v1';
 const STATIC_ASSETS = [
   '/',
