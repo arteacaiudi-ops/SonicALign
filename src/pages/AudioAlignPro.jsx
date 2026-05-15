@@ -6,35 +6,49 @@ import RtaTab from '@/components/tabs/RtaTab';
 import GenTab from '@/components/tabs/GenTab';
 import AmbienceTab from '@/components/tabs/AmbienceTab';
 import SettingsTab from '@/components/tabs/SettingsTab';
-import { Waves, BarChart2, Radio, Settings, Mic2 } from 'lucide-react';
-
-const TABS = [
-  { id: 'time', label: 'TIME', icon: Waves },
-  { id: 'rta', label: 'RTA', icon: BarChart2 },
-  { id: 'amb', label: 'AMBIENCE', icon: Mic2 },
-  { id: 'gen', label: 'GEN', icon: Radio },
-  { id: 'set', label: 'SET', icon: Settings },
-];
+import { Waves, BarChart2, Radio, Settings, Mic2, Slider } from 'lucide-react';
 
 function AppShell() {
   const [activeTab, setActiveTab] = useState('time');
-  const { isRunning, isStarting, error, start, stop, selectedDevice } = useAudioEngine();
+  const { isRunning, start, stop, inputGain, setInputGain } = useAudioEngine();
+
+  const TABS = [
+    { id: 'time', label: 'TIME', icon: Waves },
+    { id: 'rta', label: 'RTA', icon: BarChart2 },
+    { id: 'amb', label: 'AMBIENCE', icon: Mic2 },
+    { id: 'gen', label: 'GEN', icon: Radio },
+    { id: 'set', label: 'SET', icon: Settings },
+  ];
 
   return (
     <div className="flex flex-col h-screen w-screen bg-black overflow-hidden lg:flex-row">
       <div className="flex flex-col flex-1 h-full overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-900 bg-black">
-          <div>
-            <span className="font-mono-tech text-sm neon-green glow-green">AUDIO-ALIGN</span>
-            <span className="text-xs font-mono opacity-50 ml-2 text-gray-500">v{APP_VERSION}</span>
+        {/* Header com Ajuste de Ganho */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-900 bg-zinc-950">
+          <div className="flex flex-col">
+            <span className="font-bold text-xs neon-green">AUDIO-ALIGN PRO</span>
+            <span className="text-[8px] text-zinc-600 font-mono">v{APP_VERSION}</span>
           </div>
-          <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`px-4 py-1.5 rounded border text-xs font-mono ${isRunning ? 'border-red-500 text-red-500' : 'border-neon-green neon-green'}`}>
-            {isRunning ? '■ STOP' : '▶ START'}
+
+          <div className="flex items-center gap-4 flex-1 justify-center max-w-xs mx-4">
+            <span className="text-[9px] text-zinc-500 font-bold">GAIN</span>
+            <input 
+              type="range" min="0.1" max="5" step="0.1" 
+              value={inputGain} 
+              onChange={(e) => setInputGain(parseFloat(e.target.value))}
+              className="w-full h-1.5 bg-zinc-800 rounded-lg accent-neon-green"
+            />
+            <span className="text-[9px] text-neon-green font-mono w-6">{inputGain.toFixed(1)}</span>
+          </div>
+
+          <button 
+            onClick={() => isRunning ? stop() : start()} 
+            className={`px-4 py-2 rounded-md text-[10px] font-bold transition-all border ${isRunning ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-neon-green text-neon-green hover:bg-green-500/10'}`}
+          >
+            {isRunning ? '■ PARAR' : '▶ ANALISAR'}
           </button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 relative overflow-hidden">
           {activeTab === 'time' && <TimeTab />}
           {activeTab === 'rta' && <RtaTab />}
@@ -44,11 +58,11 @@ function AppShell() {
         </div>
 
         {/* Nav */}
-        <div className="flex border-t border-gray-900 bg-zinc-950">
+        <div className="flex border-t border-zinc-900 bg-black pb-safe">
           {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 flex flex-col items-center gap-1 ${activeTab === tab.id ? 'neon-green border-t-2 border-neon-green bg-green-950/10' : 'text-gray-600 border-t-2 border-transparent'}`}>
-              <tab.icon size={18} />
-              <span className="text-[9px] font-bold">{tab.label}</span>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-colors ${activeTab === tab.id ? 'text-neon-green bg-zinc-900/50' : 'text-zinc-600'}`}>
+              <tab.icon size={20} />
+              <span className="text-[8px] font-black tracking-tighter">{tab.label}</span>
             </button>
           ))}
         </div>
