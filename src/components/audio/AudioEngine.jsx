@@ -78,6 +78,7 @@ export function AudioEngineProvider({ children }) {
         latencyHint: 'interactive',
       });
       
+      // Ensure AudioContext is resumed on mobile devices
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
@@ -110,8 +111,10 @@ export function AudioEngineProvider({ children }) {
       };
       processorRef.current = processor;
 
+      // Connect source to analyser and processor
       source.connect(analyser);
       source.connect(processor);
+      // Connect processor to destination to ensure audio processing continues
       processor.connect(ctx.destination);
 
       setIsRunning(true);
