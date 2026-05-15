@@ -8,8 +8,6 @@ const BUFFER_DURATION = 8;
 
 export function AudioEngineProvider({ children }) {
   const [isRunning, setIsRunning] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
-  const [error, setError] = useState(null);
   const [inputDevices, setInputDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('default');
   const [inputGain, setInputGain] = useState(1.0);
@@ -22,20 +20,28 @@ export function AudioEngineProvider({ children }) {
   const streamRef = useRef(null);
   const circularBufferRef = useRef(null);
   const bufferWriteIdxRef = useRef(0);
-  const BUFFER_SIZE = SAMPLE_RATE * BUFFER_DURATION;
+  const activeSignalRef = useRef(null); // Rastreia o som atual
+
+  const stopActiveSignal = useCallback(() => {
+    if (activeSignalRef.current) {
+      if (activeSignalRef.current.stop) activeSignalRef.current.stop();
+      if (activeSignalRef.current.clearInterval) clearInterval(activeSignalRef.current.clearInterval);
+      activeSignalRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     const load = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        setInputDevices(devices.filter(d => d.kind === 'audioinput'));
-      } catch (e) { console.error(e); }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setInputDevices(devices.filter(d => d.kind === 'audioinput'));
     };
     load();
   }, []);
 
   const playReferenceSignal = useCallback((type, interval = 1) => {
-    if (!audioCtxRef.current) return;
+    if (!audioCtxRef.current) return null;
+    stopActiveSignal(); // PARA O SOM ANTERIOR ANTES DE COMEÇAR
+
     const ctx = audioCtxRef.current;
     
     if (type === 'pink') {
@@ -59,6 +65,7 @@ export function AudioEngineProvider({ children }) {
       node.loop = true;
       node.connect(ctx.destination);
       node.start();
+      activeSignalRef.current = node;
       return node;
     } 
 
@@ -76,21 +83,16 @@ export function AudioEngineProvider({ children }) {
         osc.start();
         osc.stop(ctx.currentTime + 0.02);
       }, interval * 1000);
-      return { stop: () => clearInterval(timer) };
+      activeSignalRef.current = { stop: () => clearInterval(timer) };
+      return activeSignalRef.current;
     }
-  }, [invertPolarity]);
+  }, [invertPolarity, stopActiveSignal]);
 
-  const start = useCallback(async (deviceId) => {
+  const start = useCallback(async () => {
     if (isRunning) return;
-    setIsStarting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { 
-          deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined, 
-          echoCancellation: false, 
-          noiseSuppression: false, 
-          autoGainControl: false 
-        }
+        audio: { deviceId: selectedDevice ? { exact: selectedDevice } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
       streamRef.current = stream;
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
@@ -105,14 +107,14 @@ export function AudioEngineProvider({ children }) {
       analyser.fftSize = 4096;
       analyserRef.current = analyser;
 
-      circularBufferRef.current = new Float32Array(BUFFER_SIZE);
+      circularBufferRef.current = new Float32Array(SAMPLE_RATE * BUFFER_DURATION);
       const processor = ctx.createScriptProcessor(2048, 1, 1);
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
         const buf = circularBufferRef.current;
         let idx = bufferWriteIdxRef.current;
         for (let i = 0; i < input.length; i++) {
-          buf[idx % BUFFER_SIZE] = input[i];
+          buf[idx % buf.length] = input[i];
           idx++;
         }
         bufferWriteIdxRef.current = idx;
@@ -123,15 +125,15 @@ export function AudioEngineProvider({ children }) {
       gainNode.connect(processor);
       processor.connect(ctx.destination);
       setIsRunning(true);
-    } catch (err) { setError(err.message); }
-    setIsStarting(false);
-  }, [isRunning, inputGain, BUFFER_SIZE]);
+    } catch (err) { console.error(err); }
+  }, [isRunning, inputGain, selectedDevice]);
 
   const stop = useCallback(() => {
+    stopActiveSignal();
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     if (audioCtxRef.current) audioCtxRef.current.close();
     setIsRunning(false);
-  }, []);
+  }, [stopActiveSignal]);
 
   useEffect(() => {
     if (gainNodeRef.current) gainNodeRef.current.gain.value = inputGain;
@@ -139,8 +141,8 @@ export function AudioEngineProvider({ children }) {
 
   return (
     <AudioEngineContext.Provider value={{
-      isRunning, isStarting, error, inputGain, setInputGain, invertPolarity, setInvertPolarity, splOffset, setSplOffset,
-      inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal,
+      isRunning, inputGain, setInputGain, invertPolarity, setInvertPolarity, splOffset, setSplOffset,
+      inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal, stopActiveSignal,
       getFrequencyData: () => {
         if (!analyserRef.current) return null;
         const data = new Float32Array(analyserRef.current.frequencyBinCount);
@@ -153,7 +155,7 @@ export function AudioEngineProvider({ children }) {
         const writeIdx = bufferWriteIdxRef.current;
         const result = new Float32Array(count);
         for (let i = 0; i < count; i++) {
-          const readIdx = ((writeIdx - count + i) % BUFFER_SIZE + BUFFER_SIZE) % BUFFER_SIZE;
+          const readIdx = ((writeIdx - count + i) % buf.length + buf.length) % buf.length;
           result[i] = buf[readIdx];
         }
         return result;
