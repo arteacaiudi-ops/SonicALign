@@ -21,11 +21,9 @@ export function AudioEngineProvider({ children }) {
   const streamRef = useRef(null);
   const circularBufferRef = useRef(null);
   const bufferWriteIdxRef = useRef(0);
-  const timeoutRef = useRef(null);
   const activeSignalRef = useRef(null);
 
   const stop = useCallback(() => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (activeSignalRef.current?.stop) activeSignalRef.current.stop();
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     setIsRunning(false);
@@ -68,17 +66,10 @@ export function AudioEngineProvider({ children }) {
       gainNode.connect(processor);
       processor.connect(ctx.destination);
       setIsRunning(true);
+    } catch (err) { alert("Erro mic: " + err.message); }
+  }, [isRunning, inputGain]);
 
-      if (batterySave) {
-        timeoutRef.current = setTimeout(() => {
-          stop();
-          alert("Análise pausada após 2 min para poupar bateria.");
-        }, 120000);
-      }
-    } catch (err) { console.error(err); }
-  }, [isRunning, inputGain, batterySave, stop]);
-
-  const autoGainNormalize = useCallback((targetDb = -20) => {
+  const autoGainNormalize = useCallback((targetDb = -25) => {
     if (!analyserRef.current) return;
     const data = new Float32Array(analyserRef.current.frequencyBinCount);
     analyserRef.current.getFloatFrequencyData(data);
@@ -86,14 +77,12 @@ export function AudioEngineProvider({ children }) {
     const diff = targetDb - avg;
     const newGain = Math.max(0.1, Math.min(10, inputGain * Math.pow(10, diff / 20)));
     setInputGain(newGain);
-    return newGain;
   }, [inputGain]);
 
   const playReferenceSignal = useCallback(async (type, interval = 1) => {
     if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') await ctx.resume();
-    
     if (activeSignalRef.current?.stop) activeSignalRef.current.stop();
 
     if (type === 'pink') {
@@ -116,7 +105,6 @@ export function AudioEngineProvider({ children }) {
       const timer = setInterval(() => {
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
-        osc.type = 'square';
         g.gain.setValueAtTime(invertPolarity ? -0.8 : 0.8, ctx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.02);
         osc.connect(g); g.connect(ctx.destination);
@@ -128,8 +116,10 @@ export function AudioEngineProvider({ children }) {
   }, [invertPolarity]);
 
   useEffect(() => {
-    if (gainNodeRef.current) gainNodeRef.current.gain.value = inputGain;
-  }, [inputGain]);
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      setInputDevices(devices.filter(d => d.kind === 'audioinput'));
+    });
+  }, []);
 
   return (
     <AudioEngineContext.Provider value={{
