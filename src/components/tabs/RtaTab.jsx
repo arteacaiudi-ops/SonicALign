@@ -1,31 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAudioEngine } from '@/components/audio/AudioEngine';
 import { TARGET_CURVES } from '@/lib/app-params';
 import { Play, Square, Crosshair, BarChart2 } from 'lucide-react';
 
 export default function RtaTab() {
-  const { isRunning, getFrequencyData, playReferenceSignal, setInputGain, inputGain } = useAudioEngine();
+  const { isRunning, getFrequencyData, playReferenceSignal, start, stop, selectedDevice, autoGainNormalize } = useAudioEngine();
   const [selectedCurve, setSelectedCurve] = useState('FLAT');
   const [isPinkRunning, setIsPinkRunning] = useState(false);
-  const [showFeedback, setShowFeedback] = useState(false);
-  const canvasRef = useRef(null);
-  const pinkRef = useRef(null);
+  const canvasRef = React.useRef(null);
 
-  const togglePink = () => {
-    if (isPinkRunning) { pinkRef.current?.stop(); setIsPinkRunning(false); }
-    else { pinkRef.current = playReferenceSignal('pink'); setIsPinkRunning(true); }
-  };
-
-  const normalize = () => {
-    const data = getFrequencyData();
-    if (!data) return;
-    const avg = data.reduce((a, b) => a + b, 0) / data.length;
-    const diff = -35 - avg;
-    setInputGain(Math.max(0.1, Math.min(10, inputGain * Math.pow(10, diff / 20))));
-    
-    // Feedback Visual
-    setShowFeedback(true);
-    setTimeout(() => setShowFeedback(false), 2000);
+  const togglePink = async () => {
+    if (isPinkRunning) { setIsPinkRunning(false); }
+    else { await playReferenceSignal('pink'); setIsPinkRunning(true); }
   };
 
   useEffect(() => {
@@ -65,24 +51,20 @@ export default function RtaTab() {
   }, [getFrequencyData, selectedCurve, isRunning]);
 
   return (
-    <div className="flex flex-col h-full bg-black p-2 font-mono relative">
-      {showFeedback && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-neon-blue text-black px-4 py-2 rounded-full text-[10px] font-black z-50 animate-bounce">
-          GANHO AJUSTADO À CURVA
-        </div>
-      )}
-      <div className="flex justify-between items-center mb-2 px-3 py-2 bg-zinc-950 border border-zinc-900 rounded-lg">
-        <select value={selectedCurve} onChange={(e) => setSelectedCurve(e.target.value)} className="bg-black text-neon-green text-[10px] font-bold p-1 border border-zinc-800 rounded uppercase outline-none">
+    <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
+      <div className="flex justify-between items-center bg-zinc-950 p-2 border-b border-zinc-900 gap-1 shrink-0">
+        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`w-16 h-10 rounded-md font-black text-[9px] border ${isRunning ? 'border-red-500 text-red-500' : 'border-neon-green text-neon-green'}`}>
+          {isRunning ? 'STOP' : 'START'}
+        </button>
+        <select value={selectedCurve} onChange={(e) => setSelectedCurve(e.target.value)} className="bg-black text-neon-green text-[10px] font-bold p-1 border border-zinc-800 rounded uppercase flex-1 mx-2">
           {Object.keys(TARGET_CURVES).map(k => <option key={k} value={k}>{TARGET_CURVES[k].label}</option>)}
         </select>
-        <div className="flex gap-2">
-          <button onClick={normalize} className="p-2 border border-neon-blue text-neon-blue rounded-md"><Crosshair size={14}/></button>
-          <button onClick={togglePink} className={`p-2 border rounded-md ${isPinkRunning ? 'border-red-500 text-red-500 bg-red-900/10' : 'border-neon-green text-neon-green'}`}>
-            {isPinkRunning ? <Square size={14}/> : <Play size={14}/>}
-          </button>
+        <div className="flex gap-1">
+          <button onClick={() => autoGainNormalize(-30)} className="p-2 border border-neon-blue text-neon-blue rounded-md"><Crosshair size={14}/></button>
+          <button onClick={togglePink} className={`p-2 border rounded-md ${isPinkRunning ? 'border-red-500 text-red-500' : 'border-neon-green text-neon-green'}`}><Play size={14}/></button>
         </div>
       </div>
-      <canvas ref={canvasRef} className="w-full flex-1 bg-zinc-950/50 rounded-lg shadow-inner" />
+      <canvas ref={canvasRef} className="w-full flex-1 bg-zinc-950/50" />
     </div>
   );
 }
