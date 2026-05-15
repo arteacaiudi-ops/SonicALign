@@ -14,6 +14,7 @@ export function AudioEngineProvider({ children }) {
   const [splOffset, setSplOffset] = useState(0);
   const [rtaComp, setRtaComp] = useState(new Array(31).fill(0));
   const [batterySave, setBatterySave] = useState(true);
+  const [invertPolarity, setInvertPolarity] = useState(false);
 
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -24,6 +25,7 @@ export function AudioEngineProvider({ children }) {
   const activeSignalRef = useRef(null);
 
   const stop = useCallback(() => {
+    if (activeSignalRef.current?.stop) activeSignalRef.current.stop();
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     setIsRunning(false);
   }, []);
@@ -44,7 +46,7 @@ export function AudioEngineProvider({ children }) {
       gainNodeRef.current = gainNode;
 
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 16384; // Maior precisão para 31 bandas
+      analyser.fftSize = 16384;
       analyserRef.current = analyser;
 
       circularBufferRef.current = new Float32Array(SAMPLE_RATE * 10);
@@ -72,13 +74,11 @@ export function AudioEngineProvider({ children }) {
     if (!analyserRef.current) return null;
     const freqData = new Float32Array(analyserRef.current.frequencyBinCount);
     analyserRef.current.getFloatFrequencyData(freqData);
-    
-    return ISO_31_BANDS.map((freq, i) => {
+    return ISO_31_BANDS.map((freq) => {
       const bin = Math.round(freq / (SAMPLE_RATE / analyserRef.current.fftSize));
-      const val = freqData[bin] || -100;
-      return val + rtaComp[i]; // Aplica a compensação da calibração
+      return freqData[bin] || -100;
     });
-  }, [rtaComp]);
+  }, []);
 
   const playReferenceSignal = useCallback(async (type) => {
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -101,19 +101,9 @@ export function AudioEngineProvider({ children }) {
       const node = ctx.createBufferSource();
       node.buffer = buffer; node.loop = true;
       node.connect(ctx.destination); node.start();
-      activeSignalRef.current = { stop: () => node.stop() };
-    } 
-    else if (type === 'sweep') {
+      activeSignalRef.current = { stop: () => { try{node.stop()}catch(e){} } };
+    } else if (type === 'sweep') {
       const now = ctx.currentTime;
-      // Tom de sincronia
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.frequency.setValueAtTime(1000, now);
-      g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(0.5, now+0.1);
-      g.gain.setValueAtTime(0.5, now+0.3); g.gain.linearRampToValueAtTime(0, now+0.4);
-      osc.connect(g); g.connect(ctx.destination);
-      osc.start(now); osc.stop(now+0.4);
-      // Sweep
       const sOsc = ctx.createOscillator();
       const sG = ctx.createGain();
       sOsc.frequency.setTargetAtTime(20000, now + 0.8, 1.5);
@@ -132,7 +122,7 @@ export function AudioEngineProvider({ children }) {
 
   return (
     <AudioEngineContext.Provider value={{
-      isRunning, inputGain, setInputGain, splOffset, setSplOffset, rtaComp, setRtaComp, batterySave, setBatterySave,
+      isRunning, inputGain, setInputGain, splOffset, setSplOffset, rtaComp, setRtaComp, batterySave, setBatterySave, invertPolarity, setInvertPolarity,
       inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal, get31BandData,
       getCircularBufferSlice: (count) => {
         if (!circularBufferRef.current) return null;
