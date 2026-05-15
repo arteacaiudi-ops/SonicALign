@@ -1,18 +1,19 @@
-export const APP_VERSION = "1.0.3q"; 
+export const APP_VERSION = "1.0.3s"; 
 
 export const ISO_31_BANDS = [
   20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 
   1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000
 ];
 
+// Curvas de referência mapeadas para as 31 bandas (valores em dB)
 export const TARGET_CURVES = {
-  FLAT: { label: "FLAT (0dB)", points: [[20, 0], [20000, 0]] },
-  LIVE: { label: "LIVE CONCERT", points: [[20, 6], [100, 6], [1000, 0], [10000, -3], [20000, -6]] },
-  CLUB: { label: "DJ / CLUB", points: [[20, 9], [80, 9], [1000, 0], [20000, 0]] },
-  SPEECH: { label: "SPEECH PRO", points: [[20, -20], [100, 0], [3000, 3], [12000, -6]] },
-  OUTDOOR: { label: "OUTDOOR PA", points: [[20, 9], [120, 9], [1000, 0], [10000, 3], [20000, 0]] }
+  FLAT: { label: "FLAT (0dB)", values: new Array(31).fill(0) },
+  LIVE: { label: "LIVE CONCERT", values: [6,6,6,6,6,5,4,3,2,1,0,0,0,0,0,0,0,-1,-2,-3,-4,-4,-5,-5,-6,-6,-6,-6,-6,-6,-6] },
+  CLUB: { label: "DJ / CLUB", values: [9,9,9,9,8,7,5,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,2,2,2,2,2,2,2] },
+  SPEECH: { label: "SPEECH PRO", values: [-15,-12,-10,-8,-4,0,2,3,4,4,3,2,1,0,0,0,0,1,2,3,4,4,3,1,-2,-4,-6,-10,-15,-20,-25] }
 };
 
+export const DEFAULT_TEMP = 25;
 const isNode = typeof window === 'undefined';
 const windowObj = isNode ? { localStorage: new Map() } : window;
 const storage = windowObj.localStorage;
