@@ -24,7 +24,7 @@ export default function AmbienceTab() {
     if (!samples) return;
 
     let pulseIdx = -1;
-    // Varredura para achar o pulso mais à direita
+    // Varredura para pulso recente (Direita)
     for (let i = samples.length - 1; i > sr; i--) {
       if (Math.abs(samples[i]) > threshold && Math.abs(samples[i-1]) < threshold) {
         pulseIdx = i;
@@ -41,7 +41,7 @@ export default function AmbienceTab() {
     
     if (early > 0) {
         const c50 = 10 * Math.log10(early / (late || 0.0001));
-        const rt60 = 0.5 + (late / (early || 1)) * 12; 
+        const rt60 = 0.5 + (late / (early || 1)) * 14; 
         setMetrics({ c50, rt60: Math.min(rt60, 5.0) });
     }
   }, [getCircularBufferSlice, getSampleRate, isRunning, threshold]);
@@ -71,12 +71,14 @@ export default function AmbienceTab() {
           ctx.beginPath();
           const step = samples.length / W;
           for(let x=0; x<W; x++) {
-              const y = H/2 - (samples[Math.floor(x*step)] * H/2);
+              const val = samples[Math.floor(x*step)];
+              const y = H/2 - (val * H/2);
               if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
           }
           ctx.stroke();
 
-          ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)';
+          // Threshold Line
+          ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
           ctx.beginPath(); ctx.moveTo(0, H/2 - (threshold * H/2)); ctx.lineTo(W, H/2 - (threshold * H/2)); ctx.stroke();
         }
       }
@@ -102,10 +104,12 @@ export default function AmbienceTab() {
       <div className="flex-1 flex overflow-hidden">
         <div className="w-10 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900 shrink-0">
           <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} />
+          <span className="text-[7px] text-red-500 rotate-90 mt-4 font-black uppercase">Thresh</span>
         </div>
 
         <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto tabular-nums">
-          <div className="h-28 bg-zinc-950 border border-zinc-800 rounded-xl relative overflow-hidden shrink-0">
+          {/* MONITOR FIXO EM TODAS AS VIEWS */}
+          <div className="h-28 bg-zinc-950 border border-zinc-800 rounded-xl relative overflow-hidden shrink-0 shadow-inner">
               <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
               <div className="absolute top-2 left-2 flex items-center gap-2 bg-black/60 px-2 py-0.5 rounded border border-zinc-800">
                 <Activity size={10} className="text-neon-blue animate-pulse"/>
@@ -115,7 +119,7 @@ export default function AmbienceTab() {
 
           <div className="p-4 bg-zinc-950 border border-zinc-900 rounded-2xl flex justify-between items-center shrink-0">
              <span className={`text-[9px] font-black uppercase ${isRunning ? 'text-neon-green animate-pulse' : 'text-zinc-700'}`}>
-                {isRunning ? 'ANALISANDO AMBIENTE' : 'MICROFONE OFF'}
+                {isRunning ? 'ANALISANDO AMBIENTE' : 'MIC DESATIVADO'}
              </span>
              <button onClick={toggleTest} className="px-4 py-3 rounded-lg font-black text-[10px] border border-neon-blue text-neon-blue">
                 {isTestRunning ? <Square size={14} className="inline mr-2"/> : <Play size={14} className="inline mr-2"/>} EMITIR PULSO
@@ -123,7 +127,7 @@ export default function AmbienceTab() {
           </div>
 
           {activeView === 'summary' && (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-4 animate-in fade-in">
                <div className="bg-zinc-900/40 p-6 rounded-2xl border border-zinc-800/50 text-center">
                   <p className="text-[9px] text-zinc-500 mb-2 uppercase font-black text-left border-b border-zinc-800 pb-2 flex justify-between">Reverb Time (RT60)</p>
                   <p className="text-5xl font-black text-white">{metrics.rt60 ? metrics.rt60.toFixed(2) + 's' : '--'}</p>
