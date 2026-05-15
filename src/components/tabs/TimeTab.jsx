@@ -18,8 +18,16 @@ export default function TimeTab() {
   const [cursorB, setCursorB] = useState(null);
   const [temperature, setTemperature] = useState(25);
   
+  // Calculate speed of sound based on temperature (in m/s)
+  // Speed of sound = 331.3 + 0.606 * temperature (in Celsius)
   const speedOfSound = SPEED_OF_SOUND_BASE + (0.606 * temperature);
-  const deltaMs = (cursorA !== null && cursorB !== null) ? Math.abs(cursorB - cursorA) * 1000 : null;
+  
+  // Calculate time delay in milliseconds between cursors
+  const sr = getSampleRate();
+  const deltaSeconds = (cursorA !== null && cursorB !== null) ? Math.abs(cursorB - cursorA) : null;
+  const deltaMs = deltaSeconds !== null ? deltaSeconds * 1000 : null;
+  
+  // Calculate distance in meters using temperature-adjusted speed of sound
   const deltaM = deltaMs !== null ? (deltaMs / 1000) * speedOfSound : null;
 
   useEffect(() => {
@@ -58,6 +66,7 @@ export default function TimeTab() {
     
     if (!samples) return;
 
+    // Reduced threshold from 0.15 to 0.05 for increased sensitivity to transients
     const threshold = 0.05; 
     let first = null, second = null;
     let minGap = sr * 0.02; 
