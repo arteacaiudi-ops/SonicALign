@@ -20,28 +20,28 @@ export function AudioEngineProvider({ children }) {
   const streamRef = useRef(null);
   const circularBufferRef = useRef(null);
   const bufferWriteIdxRef = useRef(0);
-  const activeSignalRef = useRef(null); // Rastreia o som atual
+  const activeSignalRef = useRef(null);
 
   const stopActiveSignal = useCallback(() => {
     if (activeSignalRef.current) {
       if (activeSignalRef.current.stop) activeSignalRef.current.stop();
-      if (activeSignalRef.current.clearInterval) clearInterval(activeSignalRef.current.clearInterval);
       activeSignalRef.current = null;
     }
   }, []);
 
-  useEffect(() => {
-    const load = async () => {
+  const loadDevices = useCallback(async () => {
+    try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      setInputDevices(devices.filter(d => d.kind === 'audioinput'));
-    };
-    load();
+      const inputs = devices.filter(d => d.kind === 'audioinput');
+      setInputDevices(inputs);
+    } catch (e) { console.error("Erro dispositivos", e); }
   }, []);
+
+  useEffect(() => { loadDevices(); }, [loadDevices]);
 
   const playReferenceSignal = useCallback((type, interval = 1) => {
     if (!audioCtxRef.current) return null;
-    stopActiveSignal(); // PARA O SOM ANTERIOR ANTES DE COMEÇAR
-
+    stopActiveSignal();
     const ctx = audioCtxRef.current;
     
     if (type === 'pink') {
@@ -61,8 +61,7 @@ export function AudioEngineProvider({ children }) {
         b6 = white * 0.115926;
       }
       const node = ctx.createBufferSource();
-      node.buffer = noiseBuffer;
-      node.loop = true;
+      node.buffer = noiseBuffer; node.loop = true;
       node.connect(ctx.destination);
       node.start();
       activeSignalRef.current = node;
@@ -73,26 +72,23 @@ export function AudioEngineProvider({ children }) {
       const timer = setInterval(() => {
         const g = ctx.createGain();
         const osc = ctx.createOscillator();
-        osc.type = 'square';
-        osc.frequency.value = 1;
+        osc.type = 'square'; osc.frequency.value = 1;
         const amp = invertPolarity ? -0.8 : 0.8;
         g.gain.setValueAtTime(amp, ctx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.012);
-        osc.connect(g);
-        g.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.02);
+        osc.connect(g); g.connect(ctx.destination);
+        osc.start(); osc.stop(ctx.currentTime + 0.02);
       }, interval * 1000);
       activeSignalRef.current = { stop: () => clearInterval(timer) };
       return activeSignalRef.current;
     }
   }, [invertPolarity, stopActiveSignal]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (deviceId) => {
     if (isRunning) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: selectedDevice ? { exact: selectedDevice } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        audio: { deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
       streamRef.current = stream;
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
@@ -125,8 +121,8 @@ export function AudioEngineProvider({ children }) {
       gainNode.connect(processor);
       processor.connect(ctx.destination);
       setIsRunning(true);
-    } catch (err) { console.error(err); }
-  }, [isRunning, inputGain, selectedDevice]);
+    } catch (err) { alert("Erro ao acessar microfone: " + err.message); }
+  }, [isRunning, inputGain]);
 
   const stop = useCallback(() => {
     stopActiveSignal();
