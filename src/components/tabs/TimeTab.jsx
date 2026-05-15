@@ -3,11 +3,13 @@ import { useAudioEngine } from '@/components/audio/AudioEngine';
 
 const TIMEBASES = [2, 4, 6, 8];
 const SPEED_OF_SOUND_BASE = 331.3;
+const VISUAL_GAIN = 0.9; // Normalization factor for consistent pulse height
 
 export default function TimeTab() {
   const { isRunning, getCircularBufferSlice, getSampleRate } = useAudioEngine();
   const canvasRef = useRef(null);
   const animFrameRef = useRef(null);
+  const lastFrameTimeRef = useRef(Date.now());
   const [timebase, setTimebase] = useState(4);
   const [frozen, setFrozen] = useState(false);
   const [frozenOffset, setFrozenOffset] = useState(0);
@@ -119,12 +121,37 @@ export default function TimeTab() {
         ctx.beginPath();
         ctx.strokeStyle = '#aaff00';
         ctx.lineWidth = 1.5;
-        const step = Math.max(1, Math.floor(samples.length / W));
+        
+        // Peak Detection per Pixel: Find maximum absolute value in each pixel's sample range
+        const samplesPerPixel = samples.length / W;
+        
         for (let x = 0; x < W; x++) {
-          const v = samples[Math.floor(x * step)] || 0;
-          const y = H / 2 - v * (H / 2) * 0.9;
-          if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          // Calculate precise sample range for this pixel
+          const sampleStart = x * samplesPerPixel;
+          const sampleEnd = (x + 1) * samplesPerPixel;
+          
+          // Find peak (maximum absolute value) within pixel's sample range
+          let maxAbsValue = 0;
+          const startIdx = Math.floor(sampleStart);
+          const endIdx = Math.ceil(sampleEnd);
+          
+          for (let idx = startIdx; idx < endIdx && idx < samples.length; idx++) {
+            const absValue = Math.abs(samples[idx]);
+            if (absValue > maxAbsValue) {
+              maxAbsValue = absValue;
+            }
+          }
+          
+          // Apply visual normalization for consistent pulse height
+          const y = H / 2 - maxAbsValue * (H / 2) * VISUAL_GAIN;
+          
+          if (x === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
         }
+        
         ctx.stroke();
       }
 
