@@ -24,16 +24,22 @@ export function AudioEngineProvider({ children }) {
   const bufferWriteIdxRef = useRef(0);
   const BUFFER_SIZE = SAMPLE_RATE * BUFFER_DURATION;
 
-  useEffect(() => {
-    const load = async () => {
+  // Carregar lista de microfones
+  const loadDevices = useCallback(async () => {
+    try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      setInputDevices(devices.filter(d => d.kind === 'audioinput'));
-    };
-    load();
-  }, []);
+      const inputs = devices.filter(d => d.kind === 'audioinput');
+      setInputDevices(inputs);
+      if (inputs.length > 0 && selectedDevice === 'default') {
+        setSelectedDevice(inputs[0].deviceId);
+      }
+    } catch (e) { console.error("Erro ao listar dispositivos", e); }
+  }, [selectedDevice]);
+
+  useEffect(() => { loadDevices(); }, [loadDevices]);
 
   const playReferenceSignal = useCallback((type, interval = 1) => {
-    if (!audioCtxRef.current) return;
+    if (!audioCtxRef.current) return null;
     const ctx = audioCtxRef.current;
     
     if (type === 'pink') {
@@ -76,14 +82,18 @@ export function AudioEngineProvider({ children }) {
       }, interval * 1000);
       return { stop: () => clearInterval(timer) };
     }
+    return null;
   }, [invertPolarity]);
 
-  const start = useCallback(async (deviceId) => {
+  const start = useCallback(async () => {
     if (isRunning) return;
     setIsStarting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        audio: { 
+          deviceId: selectedDevice ? { exact: selectedDevice } : undefined, 
+          echoCancellation: false, noiseSuppression: false, autoGainControl: false 
+        }
       });
       streamRef.current = stream;
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
@@ -118,7 +128,7 @@ export function AudioEngineProvider({ children }) {
       setIsRunning(true);
     } catch (err) { setError(err.message); }
     setIsStarting(false);
-  }, [isRunning, inputGain, BUFFER_SIZE]);
+  }, [isRunning, inputGain, BUFFER_SIZE, selectedDevice]);
 
   const stop = useCallback(() => {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
