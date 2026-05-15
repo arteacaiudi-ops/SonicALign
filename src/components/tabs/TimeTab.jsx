@@ -4,14 +4,20 @@ import RollingGraph from '../audio/RollingGraph';
 import { Play, Square, Snowflake, RotateCcw, Crosshair } from 'lucide-react';
 
 export default function TimeTab() {
-  const { getCircularBufferSlice, getSampleRate, isRunning, start, stop, selectedDevice, peakHoldAutoGain } = useAudioEngine();
+  const { getCircularBufferSlice, getSampleRate, playReferenceSignal, isRunning, start, stop, selectedDevice, peakHoldAutoGain } = useAudioEngine();
   const [threshold, setThreshold] = useState(0.2);
   const [timeWindow, setTimeWindow] = useState(4);
+  const [isPulseRunning, setIsPulseRunning] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
   const [frozenData, setFrozenData] = useState(null);
   const [markers, setMarkers] = useState([]); 
   const [delayInfo, setDelayInfo] = useState({ ms: 0, m: 0 });
   const [isCalibrating, setIsCalibrating] = useState(false);
+
+  const togglePulse = async () => {
+    if (isPulseRunning) { setIsPulseRunning(false); }
+    else { await playReferenceSignal('pulse'); setIsPulseRunning(true); }
+  };
 
   const handleAutoGain = async () => {
     setIsCalibrating(true);
@@ -44,7 +50,7 @@ export default function TimeTab() {
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden tabular-nums">
       <div className="bg-zinc-950 p-2 border-b border-zinc-900 flex justify-between items-center gap-1 shrink-0 shadow-lg">
         <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`w-16 h-10 rounded-md font-black text-[9px] border ${isRunning ? 'border-red-500 text-red-500' : 'border-neon-green text-neon-green'}`}>
-          {isRunning ? 'STOP' : 'START'}
+          {isRunning ? 'STOP' : 'INICIAR ANÁLISE'}
         </button>
         
         <div className="flex flex-1 justify-around bg-black/60 py-1 rounded border border-zinc-800 mx-1">
