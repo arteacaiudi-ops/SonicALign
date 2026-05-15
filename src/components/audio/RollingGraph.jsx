@@ -1,0 +1,64 @@
+import React, { useEffect, useRef } from 'react';
+
+export default function RollingGraph({ 
+  data, 
+  threshold, 
+  timeWindow, 
+  sr, 
+  color = '#00ff00', 
+  markers = [], 
+  isFrozen = false 
+}) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !data) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const W = canvas.width = canvas.offsetWidth;
+    const H = canvas.height = canvas.offsetHeight;
+
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid Vertical
+    ctx.strokeStyle = '#111';
+    for(let i=1; i<10; i++) { ctx.beginPath(); ctx.moveTo(W*i/10, 0); ctx.lineTo(W*i/10, H); ctx.stroke(); }
+
+    // Threshold Line
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+    const ty = H/2 - (threshold * H/2);
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Desenho do Envelope (Estabilidade Vertical)
+    ctx.beginPath();
+    ctx.strokeStyle = isFrozen ? '#00ffff' : color;
+    ctx.lineWidth = 1.5;
+
+    const samplesPerPixel = data.length / W;
+    for (let x = 0; x < W; x++) {
+      const startIdx = Math.floor(x * samplesPerPixel);
+      let max = 0; let min = 0;
+      for (let i = 0; i < samplesPerPixel; i++) {
+        const val = data[startIdx + i] || 0;
+        if (val > max) max = val;
+        if (val < min) min = val;
+      }
+      ctx.moveTo(x, H/2 - (min * H/2));
+      ctx.lineTo(x, H/2 - (max * H/2));
+    }
+    ctx.stroke();
+
+    // Desenho dos Marcadores (Picos)
+    markers.forEach((mIdx, i) => {
+      const x = (mIdx / data.length) * W;
+      ctx.fillStyle = i === 0 ? '#ff00ff' : '#ffff00';
+      ctx.fillRect(x - 1, 0, 3, H);
+    });
+
+  }, [data, threshold, color, markers, isFrozen]);
+
+  return <canvas ref={canvasRef} className="w-full h-full bg-black" />;
+}
