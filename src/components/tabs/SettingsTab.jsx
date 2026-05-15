@@ -17,9 +17,9 @@ export default function SettingsTab() {
   useEffect(() => {
     if (!calType || !isRunning) return;
     const interval = setInterval(() => {
-      const data = get31BandData(false); // Recebe sinal já compensado visualmente
+      const data = get31BandData(false); // Sinal compensado visualmente
       if (data) setLiveLevels(data);
-    }, 50);
+    }, 40);
     return () => clearInterval(interval);
   }, [calType, isRunning, get31BandData]);
 
@@ -37,32 +37,32 @@ export default function SettingsTab() {
     const startTime = Date.now();
     
     const calInt = setInterval(() => {
-        const rawData = get31BandData(true); // BRUTO
+        const rawData = get31BandData(true); // BRUTO para cálculo exato
         if (rawData) {
             const newComp = [...calibration.rtaComp];
             rawData.forEach((val, i) => {
-                const diff = -30 - val; // Target físico no visualizador: -30dB (metade da tela)
-                // DEADBAND: Só ajusta se a diferença for maior que 1.5dB, evitando oscilações infinitas
-                if (Math.abs(diff) > 1.5) {
-                    newComp[i] += diff * 0.05; 
+                const diff = -30 - val; // Target -30dB (Linha amarela)
+                // Mais agressivo: margem menor (0.5dB) e fator de correção maior (0.15)
+                if (Math.abs(diff) > 0.5) {
+                    newComp[i] += diff * 0.15; 
                     if (newComp[i] > 20) newComp[i] = 20;
                     if (newComp[i] < -20) newComp[i] = -20;
                 }
             });
             calibration.setRtaComp(newComp);
         }
-        // Duração aumentada para 10 segundos para convergir suavemente a linha amarela
+        
         if (Date.now() - startTime > 10000) {
             clearInterval(calInt);
             pink.stop();
             setCalType(null);
-            alert("Calibração Automática Finalizada com Sucesso!");
+            alert("Calibração Automática Agressiva Finalizada!");
         }
     }, 100);
   };
 
   const exportJSON = () => {
-    const data = { splOffset: calibration.splOffset, rtaComp: calibration.rtaComp, version: "1.0.3w" };
+    const data = { splOffset: calibration.splOffset, rtaComp: calibration.rtaComp, version: "1.0.4" };
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'sonicalign_calib.json'; a.click();
   };
@@ -89,7 +89,7 @@ export default function SettingsTab() {
       </section>
 
       <section className="grid grid-cols-2 gap-2">
-        <button onClick={exportJSON} className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white font-bold flex items-center justify-center gap-2"><Download size={14}/> EXPORTAR BACKUP</button>
+        <button onClick={exportJSON} className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white font-bold flex items-center justify-center gap-2"><Download size={14}/> EXPORTAR</button>
         <label className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white font-bold flex items-center justify-center gap-2 cursor-pointer"><Upload size={14}/> IMPORTAR<input type="file" onChange={importJSON} className="hidden"/></label>
       </section>
 
@@ -149,7 +149,7 @@ export default function SettingsTab() {
                             ></div>
                         </div>
 
-                        {/* Fader Knob (UX Travada - Touch None) */}
+                        {/* Fader Knob - Usando PointerCapture para UX perfeita */}
                         <div 
                             className="absolute w-6 h-4 bg-white rounded-sm shadow-xl border-x-2 border-blue-500 z-10 flex items-center justify-center cursor-ns-resize touch-none active:scale-125 transition-transform"
                             style={{ 
@@ -159,30 +159,28 @@ export default function SettingsTab() {
                             }}
                             onPointerDown={(e) => {
                                 if (calType !== 'rta_manual') return;
-                                e.stopPropagation(); // Evita que clique fora puxe o fader
-                                e.preventDefault();
-                                const startY = e.clientY || (e.touches && e.touches[0].clientY);
-                                const startVal = calibration.rtaComp[i];
+                                e.currentTarget.setPointerCapture(e.pointerId); // Prende o toque ao knob
+                                e.currentTarget.dataset.startY = e.clientY || (e.touches && e.touches[0].clientY);
+                                e.currentTarget.dataset.startVal = calibration.rtaComp[i];
+                            }}
+                            onPointerMove={(e) => {
+                                if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                                const startY = parseFloat(e.currentTarget.dataset.startY);
+                                const startVal = parseFloat(e.currentTarget.dataset.startVal);
+                                const currentY = e.clientY || (e.touches && e.touches[0].clientY);
                                 
-                                const onPointerMove = (mv) => {
-                                    mv.preventDefault();
-                                    const currentY = mv.clientY || (mv.touches && mv.touches[0].clientY);
-                                    const delta = (startY - currentY) / 4;
-                                    const newVal = Math.max(-20, Math.min(20, startVal + delta));
-                                    const updated = [...calibration.rtaComp];
-                                    updated[i] = newVal;
-                                    calibration.setRtaComp(updated);
-                                };
-                                const onPointerUp = () => {
-                                    window.removeEventListener('pointermove', onPointerMove);
-                                    window.removeEventListener('pointerup', onPointerUp);
-                                    window.removeEventListener('touchmove', onPointerMove);
-                                    window.removeEventListener('touchend', onPointerUp);
-                                };
-                                window.addEventListener('pointermove', onPointerMove, { passive: false });
-                                window.addEventListener('pointerup', onPointerUp);
-                                window.addEventListener('touchmove', onPointerMove, { passive: false });
-                                window.addEventListener('touchend', onPointerUp);
+                                // Calcula delta e aplica de forma suave e contínua
+                                const deltaDb = (startY - currentY) * 0.3; // Fator de suavidade
+                                const newVal = Math.max(-20, Math.min(20, startVal + deltaDb));
+                                
+                                const updated = [...calibration.rtaComp];
+                                updated[i] = newVal;
+                                calibration.setRtaComp(updated);
+                            }}
+                            onPointerUp={(e) => {
+                                if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                                    e.currentTarget.releasePointerCapture(e.pointerId);
+                                }
                             }}
                         >
                             <span className="text-[6px] font-black text-black pointer-events-none select-none">{calibration.rtaComp[i].toFixed(0)}</span>
@@ -196,7 +194,7 @@ export default function SettingsTab() {
                 <div className="p-4 bg-zinc-900 border-t border-zinc-800 flex items-center gap-3">
                     <Activity className="text-neon-green animate-spin" size={16}/>
                     <span className="text-[9px] text-zinc-400 font-bold uppercase animate-pulse">
-                        Alinhando à linha amarela (Pink Noise Reference)... Aguarde.
+                        Alinhando rigorosamente à linha amarela...
                     </span>
                 </div>
             )}
