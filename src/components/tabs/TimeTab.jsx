@@ -8,12 +8,12 @@ export default function TimeTab() {
   const [timeWindow, setTimeWindow] = useState(4);
   const [isPulseRunning, setIsPulseRunning] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
-  const [frozenData, setFrozenData] = useState(null);
   const [markers, setMarkers] = useState([]); 
   const [delayInfo, setDelayInfo] = useState({ ms: 0, m: 0 });
   
   const canvasRef = useRef(null);
   const pulseRef = useRef(null);
+  const scrollBufferRef = useRef([]); // Array de colunas [{max, min}]
 
   const togglePulse = async () => {
     if (isPulseRunning) { pulseRef.current?.stop(); setIsPulseRunning(false); }
@@ -29,92 +29,110 @@ export default function TimeTab() {
       const sr = getSampleRate();
       const W = canvas.width = canvas.offsetWidth;
       const H = canvas.height = canvas.offsetHeight;
-      const windowSamples = sr * timeWindow;
       
-      const samples = isFrozen ? frozenData : getCircularBufferSlice(windowSamples);
-      
+      // Quantas amostras por pixel?
+      const samplesPerPixel = Math.floor((sr * timeWindow) / W);
+      const rawData = getCircularBufferSlice(sr * timeWindow);
+
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, W, H);
       
+      // Grid
       ctx.strokeStyle = '#111';
       for(let i=1; i<10; i++){ ctx.beginPath(); ctx.moveTo(W*i/10, 0); ctx.lineTo(W*i/10, H); ctx.stroke(); }
 
-      if (samples) {
+      if (rawData && !isFrozen) {
+        // Threshold Line
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
         const ty = H/2 - (threshold * H/2);
         ctx.setLineDash([5, 5]);
         ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
         ctx.setLineDash([]);
 
+        // Lógica de Envelope para estabilidade vertical
         ctx.beginPath();
-        ctx.strokeStyle = isFrozen ? '#00ffff' : '#00ff00';
-        ctx.lineWidth = 2;
-        
-        const step = samples.length / W;
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 1.5;
+
+        let picosRecentes = [];
+
         for (let x = 0; x < W; x++) {
-          const val = samples[Math.floor(x * step)];
-          // Estabilização vertical: usamos o valor bruto, mas garantimos que o mapeamento x seja fixo no tempo
-          const y = H/2 - (val * H/2);
-          if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          const startIdx = x * samplesPerPixel;
+          let max = 0;
+          let min = 0;
+          
+          for (let i = 0; i < samplesPerPixel; i++) {
+            const val = rawData[startIdx + i] || 0;
+            if (val > max) max = val;
+            if (val < min) min = val;
+          }
+
+          const yMax = H/2 - (max * H/2);
+          const yMin = H/2 - (min * H/2);
+          
+          // Desenha uma linha vertical entre o min e o max (Envelope)
+          ctx.moveTo(x, yMin);
+          ctx.lineTo(x, yMax);
+
+          // Detecção (Varredura da direita para a esquerda ocorre fora deste loop)
         }
         ctx.stroke();
 
-        if (!isFrozen) {
-          let picos = [];
-          // Varredura da DIREITA para a ESQUERDA (mais recentes primeiro)
-          for (let i = samples.length - 1; i > sr * 0.1; i--) {
-            if (Math.abs(samples[i]) > threshold && Math.abs(samples[i-1]) < threshold) {
-              if (picos.length === 0 || (picos[0] - i) > sr * 0.05) {
-                picos.push(i);
-              }
+        // BUSCA DE PULSOS (Prioridade Direita)
+        let found = [];
+        for (let i = rawData.length - 1; i > sr * 0.1; i--) {
+          if (Math.abs(rawData[i]) > threshold && Math.abs(rawData[i-1]) < threshold) {
+            if (found.length === 0 || (found[0] - i) > sr * 0.05) {
+              found.push(i);
             }
-            if (picos.length >= 2) break;
           }
-          
-          if (picos.length === 2) {
-            const ordered = [picos[1], picos[0]]; // [Esquerda, Direita]
-            const ms = ((ordered[1] - ordered[0]) / sr) * 1000;
-            setMarkers(ordered);
-            setDelayInfo({ ms, m: ms * 0.343 });
-          }
+          if (found.length >= 2) break;
         }
 
-        markers.forEach((mIdx, i) => {
-          const x = (mIdx / samples.length) * W;
-          ctx.fillStyle = i === 0 ? '#ff00ff' : '#ffff00';
-          ctx.fillRect(x - 1, 0, 3, H);
-        });
+        if (found.length === 2) {
+          const ordered = [found[1], found[0]];
+          setMarkers(ordered);
+          const ms = ((ordered[1] - ordered[0]) / sr) * 1000;
+          setDelayInfo({ ms, m: ms * 0.343 });
+        }
       }
+
+      // Se estiver congelado, desenha os marcadores fixos
+      markers.forEach((mIdx, i) => {
+        const x = (mIdx / rawData.length) * W;
+        ctx.fillStyle = i === 0 ? '#ff00ff' : '#ffff00';
+        ctx.fillRect(x - 1, 0, 3, H);
+      });
+
       frame = requestAnimationFrame(draw);
     };
     draw();
     return () => cancelAnimationFrame(frame);
-  }, [getCircularBufferSlice, getSampleRate, threshold, timeWindow, isFrozen, frozenData, markers]);
+  }, [getCircularBufferSlice, getSampleRate, threshold, timeWindow, isFrozen, markers]);
 
   return (
     <div className="flex flex-col h-full bg-black font-mono">
-      <div className="bg-zinc-950 p-2 border-b border-zinc-900 flex justify-between items-center gap-2">
-        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className="w-24 px-2 py-2 rounded-md font-black text-[10px] border shrink-0 bg-neon-green/10 border-neon-green text-neon-green">
+      <div className="bg-zinc-950 p-2 border-b border-zinc-900 flex justify-between items-center gap-2 shrink-0 shadow-lg">
+        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className="w-24 px-2 py-2 rounded-md font-black text-[10px] border border-neon-green text-neon-green bg-neon-green/5">
           {isRunning ? 'STOP MIC' : 'ANALISAR'}
         </button>
         
-        {/* Larguras fixas (w-24) para evitar que o layout se mova com os números */}
-        <div className="flex gap-2 bg-black/40 px-3 py-1 rounded border border-zinc-800 shrink-0 tabular-nums">
+        <div className="flex gap-2 bg-black/60 px-3 py-1 rounded border border-zinc-800 shrink-0 tabular-nums">
           <div className="w-24">
-            <span className="text-[7px] text-zinc-500 block leading-none">DELTA</span>
+            <span className="text-[7px] text-zinc-500 block">DELTA</span>
             <span className="text-neon-yellow text-xs font-black">{delayInfo.ms.toFixed(2)}ms</span>
           </div>
           <div className="w-24 border-l border-zinc-800 pl-2">
-            <span className="text-[7px] text-zinc-500 block leading-none">DIST</span>
+            <span className="text-[7px] text-zinc-500 block">DIST</span>
             <span className="text-neon-blue text-xs font-black">{delayInfo.m.toFixed(2)}m</span>
           </div>
         </div>
 
-        <div className="flex gap-1 ml-auto shrink-0">
-          <select value={timeWindow} onChange={(e)=>setTimeWindow(parseInt(e.target.value))} className="bg-zinc-900 text-[10px] text-white p-1 rounded border border-zinc-800">
+        <div className="flex gap-1 ml-auto">
+          <select value={timeWindow} onChange={(e)=>setTimeWindow(parseInt(e.target.value))} className="bg-zinc-900 text-[10px] text-white p-1 rounded border border-zinc-800 outline-none">
             {[2, 4, 6, 8].map(t => <option key={t} value={t}>{t}s</option>)}
           </select>
-          <button onClick={() => { if(!isFrozen) setFrozenData(getCircularBufferSlice(getSampleRate() * timeWindow)); setIsFrozen(!isFrozen); }} className={`p-2 rounded border ${isFrozen ? 'bg-cyan-500 border-cyan-500 text-black' : 'border-zinc-800 text-zinc-400'}`}><Snowflake size={14}/></button>
+          <button onClick={() => setIsFrozen(!isFrozen)} className={`p-2 rounded border ${isFrozen ? 'bg-cyan-500 text-black shadow-[0_0_10px_#00ffff]' : 'border-zinc-800 text-zinc-400'}`}><Snowflake size={14}/></button>
           <button onClick={()=>setMarkers([])} className="p-2 rounded border border-zinc-800 text-zinc-400"><RotateCcw size={14}/></button>
           <button onClick={togglePulse} className={`px-2 py-1 rounded border text-[9px] font-black ${isPulseRunning ? 'bg-red-500 text-white' : 'text-neon-blue border-neon-blue'}`}>{isPulseRunning ? 'STOP' : 'PULSE'}</button>
         </div>
@@ -122,7 +140,7 @@ export default function TimeTab() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-10 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900 shrink-0">
-          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500 appearance-none bg-zinc-900 w-1" style={{ appearance: 'slider-vertical' }} />
+          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} />
         </div>
         <canvas ref={canvasRef} className="flex-1 bg-black" />
       </div>
