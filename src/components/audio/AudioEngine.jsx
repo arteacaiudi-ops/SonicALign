@@ -4,7 +4,7 @@ const AudioEngineContext = createContext(null);
 export const useAudioEngine = () => useContext(AudioEngineContext);
 
 const SAMPLE_RATE = 48000;
-const BUFFER_DURATION = 8; 
+const BUFFER_DURATION = 10; 
 
 export function AudioEngineProvider({ children }) {
   const [isRunning, setIsRunning] = useState(false);
@@ -22,32 +22,33 @@ export function AudioEngineProvider({ children }) {
   const bufferWriteIdxRef = useRef(0);
   const activeSignalRef = useRef(null);
 
-  // Inicializa ou recupera o contexto de áudio sem precisar do microfone
   const ensureContext = useCallback(async () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    if (audioCtxRef.current.state === 'suspended') {
-      await audioCtxRef.current.resume();
-    }
+    if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
     return audioCtxRef.current;
   }, []);
 
   const stopActiveSignal = useCallback(() => {
     if (activeSignalRef.current) {
-      if (activeSignalRef.current.stop) activeSignalRef.current.stop();
+      // Se for um nó (Pink Noise)
+      if (activeSignalRef.current.stop && typeof activeSignalRef.current.stop === 'function') {
+        try { activeSignalRef.current.stop(); } catch(e){}
+      }
+      // Se for um intervalo (Pulso)
+      if (activeSignalRef.current.intervalId) {
+        clearInterval(activeSignalRef.current.intervalId);
+      }
       activeSignalRef.current = null;
     }
   }, []);
 
-  const loadDevices = useCallback(async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
+  useEffect(() => {
+    navigator.mediaDevices.enumerateDevices().then(devices => {
       setInputDevices(devices.filter(d => d.kind === 'audioinput'));
-    } catch (e) { console.error("Erro dispositivos", e); }
+    });
   }, []);
-
-  useEffect(() => { loadDevices(); }, [loadDevices]);
 
   const playReferenceSignal = useCallback(async (type, interval = 1) => {
     const ctx = await ensureContext();
@@ -60,12 +61,9 @@ export function AudioEngineProvider({ children }) {
       let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
       for (let i = 0; i < bufferSize; i++) {
         const white = Math.random() * 2 - 1;
-        b0 = 0.99886 * b0 + white * 0.0555179;
-        b1 = 0.99332 * b1 + white * 0.0750759;
-        b2 = 0.96900 * b2 + white * 0.1538520;
-        b3 = 0.86650 * b3 + white * 0.3104856;
-        b4 = 0.55000 * b4 + white * 0.5329522;
-        b5 = -0.7616 * b5 - white * 0.0168980;
+        b0 = 0.99886 * b0 + white * 0.0555179; b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520; b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522; b5 = -0.7616 * b5 - white * 0.0168980;
         output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
         b6 = white * 0.115926;
       }
@@ -74,11 +72,11 @@ export function AudioEngineProvider({ children }) {
       node.connect(ctx.destination);
       node.start();
       activeSignalRef.current = node;
-      return node;
+      return { stop: () => { node.stop(); activeSignalRef.current = null; } };
     } 
 
     if (type === 'pulse') {
-      const timer = setInterval(() => {
+      const intervalId = setInterval(() => {
         const g = ctx.createGain();
         const osc = ctx.createOscillator();
         osc.type = 'square'; osc.frequency.value = 1;
@@ -88,7 +86,7 @@ export function AudioEngineProvider({ children }) {
         osc.connect(g); g.connect(ctx.destination);
         osc.start(); osc.stop(ctx.currentTime + 0.02);
       }, interval * 1000);
-      activeSignalRef.current = { stop: () => clearInterval(timer) };
+      activeSignalRef.current = { intervalId, stop: () => { clearInterval(intervalId); activeSignalRef.current = null; } };
       return activeSignalRef.current;
     }
   }, [invertPolarity, stopActiveSignal, ensureContext]);
@@ -101,15 +99,12 @@ export function AudioEngineProvider({ children }) {
         audio: { deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
       streamRef.current = stream;
-
       const gainNode = ctx.createGain();
       gainNode.gain.value = inputGain;
       gainNodeRef.current = gainNode;
-
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 4096;
       analyserRef.current = analyser;
-
       circularBufferRef.current = new Float32Array(SAMPLE_RATE * BUFFER_DURATION);
       const processor = ctx.createScriptProcessor(2048, 1, 1);
       processor.onaudioprocess = (e) => {
@@ -122,13 +117,11 @@ export function AudioEngineProvider({ children }) {
         }
         bufferWriteIdxRef.current = idx;
       };
-
       ctx.createMediaStreamSource(stream).connect(gainNode);
-      gainNode.connect(analyser);
-      gainNode.connect(processor);
+      gainNode.connect(analyser); gainNode.connect(processor);
       processor.connect(ctx.destination);
       setIsRunning(true);
-    } catch (err) { alert("Erro ao acessar microfone: " + err.message); }
+    } catch (err) { alert(err.message); }
   }, [isRunning, inputGain, ensureContext]);
 
   const stop = useCallback(() => {
@@ -137,10 +130,6 @@ export function AudioEngineProvider({ children }) {
     setIsRunning(false);
   }, [stopActiveSignal]);
 
-  useEffect(() => {
-    if (gainNodeRef.current) gainNodeRef.current.gain.value = inputGain;
-  }, [inputGain]);
-
   return (
     <AudioEngineContext.Provider value={{
       isRunning, inputGain, setInputGain, invertPolarity, setInvertPolarity, splOffset, setSplOffset,
@@ -148,8 +137,7 @@ export function AudioEngineProvider({ children }) {
       getFrequencyData: () => {
         if (!analyserRef.current) return null;
         const data = new Float32Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getFloatFrequencyData(data);
-        return data;
+        analyserRef.current.getFloatFrequencyData(data); return data;
       },
       getCircularBufferSlice: (count) => {
         if (!circularBufferRef.current) return null;
@@ -162,7 +150,7 @@ export function AudioEngineProvider({ children }) {
         }
         return result;
       },
-      getSampleRate: () => audioCtxRef.current?.sampleRate || SAMPLE_RATE
+      getSampleRate: () => SAMPLE_RATE
     }}>
       {children}
     </AudioEngineContext.Provider>
