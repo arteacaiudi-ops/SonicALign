@@ -23,7 +23,6 @@ export function AudioEngineProvider({ children }) {
   const circularBufferRef = useRef(null);
   const bufferWriteIdxRef = useRef(0);
   const BUFFER_SIZE = SAMPLE_RATE * BUFFER_DURATION;
-  const processorRef = useRef(null);
 
   useEffect(() => {
     const load = async () => {
@@ -69,7 +68,7 @@ export function AudioEngineProvider({ children }) {
         osc.frequency.value = 1;
         const amp = invertPolarity ? -0.8 : 0.8;
         g.gain.setValueAtTime(amp, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.012);
         osc.connect(g);
         g.connect(ctx.destination);
         osc.start();
@@ -126,6 +125,10 @@ export function AudioEngineProvider({ children }) {
     if (audioCtxRef.current) audioCtxRef.current.close();
     setIsRunning(false);
   }, []);
+
+  useEffect(() => {
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = inputGain;
+  }, [inputGain]);
 
   return (
     <AudioEngineContext.Provider value={{
