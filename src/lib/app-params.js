@@ -2,7 +2,7 @@ const isNode = typeof window === 'undefined';
 const windowObj = isNode ? { localStorage: new Map() } : window;
 const storage = windowObj.localStorage;
 
-export const APP_VERSION = "1.0.3j"; 
+export const APP_VERSION = "1.0.3k"; 
 
 export const TARGET_CURVES = {
   FLAT: { label: "FLAT (0dB)", points: [[20, 0], [20000, 0]] },
