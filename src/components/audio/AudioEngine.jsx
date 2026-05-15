@@ -14,6 +14,7 @@ export function AudioEngineProvider({ children }) {
   const [batterySave, setBatterySave] = useState(true);
   const [invertPolarity, setInvertPolarity] = useState(false);
   const [splOffset, setSplOffset] = useState(0);
+  const [rtaCalibration, setRtaCalibration] = useState(null);
 
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -45,7 +46,7 @@ export function AudioEngineProvider({ children }) {
       gainNodeRef.current = gainNode;
 
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 4096;
+      analyser.fftSize = 8192;
       analyserRef.current = analyser;
 
       circularBufferRef.current = new Float32Array(SAMPLE_RATE * BUFFER_DURATION);
@@ -69,39 +70,78 @@ export function AudioEngineProvider({ children }) {
     } catch (err) { alert("Erro mic: " + err.message); }
   }, [isRunning, inputGain]);
 
-  const autoGainNormalize = useCallback((targetDb = -25) => {
-    if (!analyserRef.current) return;
-    const data = new Float32Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getFloatFrequencyData(data);
-    const avg = data.reduce((a, b) => a + b, 0) / data.length;
-    const diff = targetDb - avg;
-    const newGain = Math.max(0.1, Math.min(10, inputGain * Math.pow(10, diff / 20)));
-    setInputGain(newGain);
-  }, [inputGain]);
+  const peakHoldAutoGain = useCallback(async (durationMs = 5000) => {
+    if (!isRunning) return;
+    let maxPeak = 0;
+    const startT = Date.now();
+    
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        const samples = circularBufferRef.current.slice(-SAMPLE_RATE);
+        for(let s of samples) if(Math.abs(s) > maxPeak) maxPeak = Math.abs(s);
+        
+        if (Date.now() - startT > durationMs) {
+          clearInterval(check);
+          const target = 0.25; // -12dBFS approx
+          const newGain = Math.max(0.1, Math.min(10, (target / (maxPeak || 0.01)) * inputGain));
+          setInputGain(newGain);
+          // Sinaliza reset de gráfico limpando o buffer (preenche com 0)
+          circularBufferRef.current.fill(0);
+          resolve(newGain);
+        }
+      }, 100);
+    });
+  }, [isRunning, inputGain]);
 
   const playReferenceSignal = useCallback(async (type, interval = 1) => {
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') await ctx.resume();
     if (activeSignalRef.current?.stop) activeSignalRef.current.stop();
 
     if (type === 'pink') {
-      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-      const output = noiseBuffer.getChannelData(0);
-      let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
-      for (let i = 0; i < noiseBuffer.length; i++) {
-        const white = Math.random() * 2 - 1;
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let b0, b1, b2, b3, b4, b5, b6;
+      b0 = b1 = b2 = b3 = b4 = b5 = b6 = 0.0;
+      for (let i = 0; i < buffer.length; i++) {
+        let white = Math.random() * 2 - 1;
         b0 = 0.99886 * b0 + white * 0.0555179; b1 = 0.99332 * b1 + white * 0.0750759;
         b2 = 0.96900 * b2 + white * 0.1538520; b3 = 0.86650 * b3 + white * 0.3104856;
         b4 = 0.55000 * b4 + white * 0.5329522; b5 = -0.7616 * b5 - white * 0.0168980;
-        output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
         b6 = white * 0.115926;
       }
       const node = ctx.createBufferSource();
-      node.buffer = noiseBuffer; node.loop = true;
+      node.buffer = buffer; node.loop = true;
       node.connect(ctx.destination); node.start();
       activeSignalRef.current = { stop: () => { try{node.stop()}catch(e){} } };
-    } else {
+    } 
+    else if (type === 'sweep') {
+      // Sincronia: Tom de 1kHz por 300ms -> Silêncio 500ms -> Sweep 5s
+      const now = ctx.currentTime;
+      const oscSync = ctx.createOscillator();
+      const gainSync = ctx.createGain();
+      oscSync.frequency.setValueAtTime(1000, now);
+      gainSync.gain.setValueAtTime(0, now);
+      gainSync.gain.linearRampToValueAtTime(0.5, now + 0.05);
+      gainSync.gain.setValueAtTime(0.5, now + 0.25);
+      gainSync.gain.linearRampToValueAtTime(0, now + 0.3);
+      oscSync.connect(gainSync); gainSync.connect(ctx.destination);
+      oscSync.start(now); oscSync.stop(now + 0.3);
+
+      const sweepOsc = ctx.createOscillator();
+      const sweepGain = ctx.createGain();
+      sweepOsc.frequency.setTargetAtTime(20000, now + 0.8, 1.5); // Sweep Logarítmico
+      sweepGain.gain.setValueAtTime(0, now + 0.8);
+      sweepGain.gain.linearRampToValueAtTime(0.7, now + 0.9);
+      sweepGain.gain.setValueAtTime(0.7, now + 5.8);
+      sweepGain.gain.linearRampToValueAtTime(0, now + 6.0);
+      sweepOsc.connect(sweepGain); sweepGain.connect(ctx.destination);
+      sweepOsc.start(now + 0.8); sweepOsc.stop(now + 6.0);
+      activeSignalRef.current = { stop: () => { sweepOsc.stop(); } };
+    }
+    else {
       const timer = setInterval(() => {
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
@@ -123,8 +163,8 @@ export function AudioEngineProvider({ children }) {
 
   return (
     <AudioEngineContext.Provider value={{
-      isRunning, inputGain, setInputGain, batterySave, setBatterySave, invertPolarity, setInvertPolarity, splOffset, setSplOffset,
-      inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal, autoGainNormalize,
+      isRunning, inputGain, setInputGain, batterySave, setBatterySave, invertPolarity, setInvertPolarity, splOffset, setSplOffset, rtaCalibration, setRtaCalibration,
+      inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal, peakHoldAutoGain,
       getFrequencyData: () => {
         if (!analyserRef.current) return null;
         const data = new Float32Array(analyserRef.current.frequencyBinCount);
