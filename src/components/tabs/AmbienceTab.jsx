@@ -8,7 +8,7 @@ export default function AmbienceTab() {
   const [activeView, setActiveView] = useState('summary');
   const [threshold, setThreshold] = useState(0.25);
   const [metrics, setMetrics] = useState({ rt60: null, c50: null });
-  const [sweepState, setSweepState] = useState('idle'); // idle, listening, recording, done
+  const [sweepState, setSweepState] = useState('idle'); 
   const [liveData, setLiveData] = useState(new Float32Array(0));
   const [isCalibrating, setIsCalibrating] = useState(false);
   const timerRef = useRef(null);
@@ -29,7 +29,7 @@ export default function AmbienceTab() {
 
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
-    // Procura o final do sweep (queda brusca de energia após os 5 segundos)
+    // Procura o fim do sweep
     let sweepEndIdx = -1;
     for (let i = samples.length - Math.floor(sr * 0.1); i > sr; i--) {
       if (Math.abs(samples[i]) > threshold * 0.6 && Math.abs(samples[i+100] || 0) < threshold * 0.2) {
@@ -37,17 +37,14 @@ export default function AmbienceTab() {
       }
     }
     
-    // Se não encontrou uma queda clara, assume um ponto seguro 1.5s antes do final do buffer de 8s
     if (sweepEndIdx === -1) sweepEndIdx = samples.length - Math.floor(sr * 1.5);
 
     const fiftyMs = Math.floor(sr * 0.05);
     let early = 0, late = 0;
     
-    // Energia Inicial (Direta)
     for (let i = sweepEndIdx - fiftyMs; i < sweepEndIdx + fiftyMs; i++) {
         if(samples[i]) early += samples[i] ** 2;
     }
-    // Energia Tardia (Reverberação)
     for (let i = sweepEndIdx + fiftyMs; i < sweepEndIdx + (sr * 1.5); i++) {
         if(samples[i]) late += samples[i] ** 2;
     }
@@ -55,7 +52,7 @@ export default function AmbienceTab() {
     if (early > 0) {
       setMetrics({ 
         c50: 10 * Math.log10(early / (late || 0.00001)), 
-        rt60: 0.3 + (late / early) * 12 // Ajuste do multiplicador
+        rt60: 0.3 + (late / early) * 12 
       });
       setSweepState('done');
       stop(); 
@@ -68,9 +65,8 @@ export default function AmbienceTab() {
       const samples = getCircularBufferSlice(getSampleRate() * 8); 
       setLiveData(samples);
 
-      // Estado 1: Escutando (Aguardando o bip de sincronia inicial)
       if (sweepState === 'listening') {
-        const recentSamples = getCircularBufferSlice(getSampleRate()); // Olha apenas o último segundo
+        const recentSamples = getCircularBufferSlice(getSampleRate());
         let triggered = false;
         for (let i = 0; i < recentSamples.length; i++) {
           if (Math.abs(recentSamples[i]) > threshold) { triggered = true; break; }
@@ -78,7 +74,7 @@ export default function AmbienceTab() {
         
         if (triggered) {
           setSweepState('recording');
-          // Estado 2: Gravando o Sweep + Cauda de Reverb. Espera 6.5 segundos completos.
+          // Espera 6.5s ininterruptos após o bip (5s de Sweep + 1.5s Margem Reflexos)
           timerRef.current = setTimeout(() => {
              const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
              processAcoustics(finalSamples);
@@ -106,15 +102,14 @@ export default function AmbienceTab() {
   return (
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
       <div className="flex bg-zinc-950 border-b border-zinc-900 overflow-x-auto no-scrollbar px-1 py-1 gap-1 shrink-0">
-        <button onClick={() => { setSweepState('idle'); isRunning ? stop() : start(selectedDevice); }} className={`w-20 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}>
-          {isRunning ? 'STOP' : 'INICIAR ANÁLISE'}
+        <button onClick={() => { setSweepState('idle'); isRunning ? stop() : start(selectedDevice); }} className={`w-24 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}>
+          {isRunning ? 'PARAR' : 'INICIAR ANÁLISE'}
         </button>
         {VIEWS.map(v => (
           <button key={v.id} onClick={() => setActiveView(v.id)} className={`flex-shrink-0 px-3 py-3 text-[9px] font-bold uppercase border-b-2 transition-all ${activeView === v.id ? 'text-neon-blue border-neon-blue' : 'text-zinc-600 border-transparent'}`}>{v.label}</button>
         ))}
       </div>
 
-      {/* FEEDBACK DE ESTADO DO SWEEP */}
       {sweepState === 'listening' && (
         <div className="bg-neon-blue/20 p-3 flex items-center gap-3 animate-pulse border-b border-neon-blue/30">
           <AlertCircle className="text-neon-blue" size={20}/>
@@ -125,13 +120,13 @@ export default function AmbienceTab() {
       {sweepState === 'recording' && (
         <div className="bg-red-500/20 p-3 flex items-center gap-3 animate-pulse border-b border-red-500/30">
           <Activity className="text-red-500" size={20}/>
-          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP...<br/>AGUARDE 6 SEGUNDOS PARA FINALIZAÇÃO.</div>
+          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP (6.5s)...<br/>CAPTURANDO REFLEXOS. AGUARDE.</div>
         </div>
       )}
 
       {sweepState === 'done' && (
         <div className="bg-neon-green/20 p-2 flex items-center gap-2 border-b border-neon-green/30 text-[10px] text-neon-green font-black">
-            <CheckCircle size={14}/> LEITURA FINALIZADA.
+            <CheckCircle size={14}/> LEITURA COMPLETA REGISTRADA.
         </div>
       )}
 
@@ -152,9 +147,9 @@ export default function AmbienceTab() {
                 className={`px-4 py-2 rounded-lg font-black text-[9px] border transition-all ${(sweepState === 'listening' || sweepState === 'recording') ? 'bg-neon-green text-black border-neon-green' : 'border-neon-blue text-neon-blue'}`}
                 disabled={sweepState === 'recording'}
              >
-                {(sweepState === 'listening' || sweepState === 'recording') ? 'CANCELAR ESCUTA' : 'AGUARDAR SINAL'}
+                {(sweepState === 'listening' || sweepState === 'recording') ? 'CANCELAR' : 'AGUARDAR SINAL'}
              </button>
-             <button onClick={() => playReferenceSignal('sweep')} className="p-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white" disabled={sweepState === 'recording'}><Play size={10} className="inline mr-1"/> EMITIR SINAL</button>
+             <button onClick={() => playReferenceSignal('sweep')} className="p-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white" disabled={sweepState === 'recording'}><Play size={10} className="inline mr-1"/> SINAL</button>
           </div>
 
           {activeView === 'summary' && (
@@ -169,10 +164,6 @@ export default function AmbienceTab() {
                </div>
             </div>
           )}
-          {activeView === 'etc' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo ETC (Breve)</div>}
-          {activeView === 'bands' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Oitavas (Breve)</div>}
-          {activeView === 'waterfall' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Waterfall (Breve)</div>}
-          {activeView === 'eq' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Correção EQ (Breve)</div>}
         </div>
       </div>
     </div>
