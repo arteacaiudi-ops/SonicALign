@@ -24,22 +24,18 @@ export function AudioEngineProvider({ children }) {
   const bufferWriteIdxRef = useRef(0);
   const BUFFER_SIZE = SAMPLE_RATE * BUFFER_DURATION;
 
-  // Carregar lista de microfones
-  const loadDevices = useCallback(async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const inputs = devices.filter(d => d.kind === 'audioinput');
-      setInputDevices(inputs);
-      if (inputs.length > 0 && selectedDevice === 'default') {
-        setSelectedDevice(inputs[0].deviceId);
-      }
-    } catch (e) { console.error("Erro ao listar dispositivos", e); }
-  }, [selectedDevice]);
-
-  useEffect(() => { loadDevices(); }, [loadDevices]);
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setInputDevices(devices.filter(d => d.kind === 'audioinput'));
+      } catch (e) { console.error(e); }
+    };
+    load();
+  }, []);
 
   const playReferenceSignal = useCallback((type, interval = 1) => {
-    if (!audioCtxRef.current) return null;
+    if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
     
     if (type === 'pink') {
@@ -82,17 +78,18 @@ export function AudioEngineProvider({ children }) {
       }, interval * 1000);
       return { stop: () => clearInterval(timer) };
     }
-    return null;
   }, [invertPolarity]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (deviceId) => {
     if (isRunning) return;
     setIsStarting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { 
-          deviceId: selectedDevice ? { exact: selectedDevice } : undefined, 
-          echoCancellation: false, noiseSuppression: false, autoGainControl: false 
+          deviceId: deviceId !== 'default' ? { exact: deviceId } : undefined, 
+          echoCancellation: false, 
+          noiseSuppression: false, 
+          autoGainControl: false 
         }
       });
       streamRef.current = stream;
@@ -128,7 +125,7 @@ export function AudioEngineProvider({ children }) {
       setIsRunning(true);
     } catch (err) { setError(err.message); }
     setIsStarting(false);
-  }, [isRunning, inputGain, BUFFER_SIZE, selectedDevice]);
+  }, [isRunning, inputGain, BUFFER_SIZE]);
 
   const stop = useCallback(() => {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
