@@ -21,20 +21,18 @@ export default function TimeTab() {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const sr = getSampleRate();
-      const samples = getCircularBufferSlice(sr * 2); // 2 segundos de visualização
-      const W = canvas.width;
-      const H = canvas.height;
-
+      const samples = getCircularBufferSlice(sr * 2); 
+      const W = canvas.width = canvas.offsetWidth;
+      const H = canvas.height = canvas.offsetHeight;
       ctx.clearRect(0, 0, W, H);
       
-      // Linha de Threshold
+      // Linha do Threshold
       ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-      const threshY = H/2 - (threshold * H/2);
-      ctx.beginPath(); ctx.moveTo(0, threshY); ctx.lineTo(W, threshY); ctx.stroke();
+      const ty = H/2 - (threshold * H/2);
+      ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
 
       if (samples) {
-        ctx.beginPath();
-        ctx.strokeStyle = '#00ff00';
+        ctx.beginPath(); ctx.strokeStyle = '#00ff00';
         const step = samples.length / W;
         for (let x = 0; x < W; x++) {
           const sample = samples[Math.floor(x * step)];
@@ -51,14 +49,13 @@ export default function TimeTab() {
 
   return (
     <div className="flex h-full bg-black font-mono">
-      <div className="flex flex-col items-center p-2 border-r border-zinc-900 gap-4">
+      <div className="flex flex-col items-center p-2 border-r border-zinc-900 gap-4 bg-zinc-950">
         <input type="range" min="0" max="0.5" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-48 accent-red-500" style={{ appearance: 'slider-vertical' }} />
-        <span className="text-[10px] text-red-500 rotate-90 mt-4">THR</span>
         <button onClick={togglePulse} className={`p-2 border rounded ${isPulseRunning ? 'border-red-500 text-red-500' : 'border-neon-green text-neon-green'}`}>
           {isPulseRunning ? <Square size={16}/> : <Play size={16}/>}
         </button>
       </div>
-      <canvas ref={canvasRef} width={1000} height={400} className="flex-1 bg-zinc-950" />
+      <canvas ref={canvasRef} className="flex-1 bg-zinc-950" />
     </div>
   );
 }
