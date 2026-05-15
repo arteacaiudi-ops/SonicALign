@@ -5,7 +5,7 @@ import { Play, Square, Snowflake, RotateCcw } from 'lucide-react';
 export default function TimeTab() {
   const { getCircularBufferSlice, getSampleRate, playReferenceSignal, isRunning, start, stop, selectedDevice } = useAudioEngine();
   const [threshold, setThreshold] = useState(0.2);
-  const [timeWindow, setTimeWindow] = useState(2);
+  const [timeWindow, setTimeWindow] = useState(4);
   const [isPulseRunning, setIsPulseRunning] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
   const [frozenData, setFrozenData] = useState(null);
@@ -36,12 +36,12 @@ export default function TimeTab() {
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, W, H);
       
-      // Grid
+      // Grid Vertical (Tempo)
       ctx.strokeStyle = '#111';
       for(let i=1; i<10; i++){ ctx.beginPath(); ctx.moveTo(W*i/10, 0); ctx.lineTo(W*i/10, H); ctx.stroke(); }
 
       if (samples) {
-        // Linha de Threshold
+        // Threshold Line
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
         const ty = H/2 - (threshold * H/2);
         ctx.setLineDash([5, 5]);
@@ -55,25 +55,37 @@ export default function TimeTab() {
         const step = samples.length / W;
         let picos = [];
 
+        // Desenhar forma de onda
         for (let x = 0; x < W; x++) {
           const sIdx = Math.floor(x * step);
           const val = samples[sIdx];
           const y = H/2 - (val * H/2);
-          
           if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-
-          if (!isFrozen && Math.abs(val) > threshold && picos.length < 2) {
-             if (picos.length === 0 || (sIdx - picos[0]) > sr * 0.05) picos.push(sIdx);
-          }
         }
         ctx.stroke();
 
-        if (!isFrozen && picos.length === 2) {
-           const ms = ((picos[1] - picos[0]) / sr) * 1000;
-           setMarkers(picos);
-           setDelayInfo({ ms, m: ms * 0.343 });
+        // Detecção Automática (Priorizando Direita)
+        if (!isFrozen) {
+          // Varre da direita para a esquerda
+          for (let i = samples.length - 1; i > 0; i--) {
+            if (Math.abs(samples[i]) > threshold && Math.abs(samples[i-1]) < threshold) {
+              if (picos.length === 0 || (picos[0] - i) > sr * 0.1) {
+                picos.push(i);
+              }
+            }
+            if (picos.length >= 2) break;
+          }
+          
+          if (picos.length === 2) {
+            // Reordenar para [esquerda, direita] para o cálculo
+            const ordered = [picos[1], picos[0]];
+            const ms = ((ordered[1] - ordered[0]) / sr) * 1000;
+            setMarkers(ordered);
+            setDelayInfo({ ms, m: ms * 0.343 });
+          }
         }
 
+        // Desenhar Marcadores
         markers.forEach((mIdx, i) => {
           const x = (mIdx / samples.length) * W;
           ctx.fillStyle = i === 0 ? '#ff00ff' : '#ffff00';
@@ -89,25 +101,35 @@ export default function TimeTab() {
   return (
     <div className="flex flex-col h-full bg-black font-mono">
       <div className="bg-zinc-950 p-2 border-b border-zinc-900 flex justify-between items-center gap-2">
-        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`px-4 py-2 rounded-md font-black text-[10px] border shrink-0 ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-green/10 border-neon-green text-neon-green'}`}>
+        <button onClick={() => isRunning ? stop() : start(selectedDevice)} className={`px-4 py-2 rounded-md font-black text-[10px] border shrink-0 transition-all ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-green/10 border-neon-green text-neon-green'}`}>
           {isRunning ? 'STOP MIC' : 'ANALISAR'}
         </button>
-        <div className="flex gap-4 bg-black/40 px-3 py-1 rounded border border-zinc-800 shrink-0">
-          <div className="flex flex-col"><span className="text-[7px] text-zinc-500">DELTA</span><span className="text-neon-yellow text-xs font-black">{delayInfo.ms.toFixed(2)}ms</span></div>
-          <div className="flex flex-col border-l border-zinc-800 pl-3"><span className="text-[7px] text-zinc-500">DIST</span><span className="text-neon-blue text-xs font-black">{delayInfo.m.toFixed(2)}m</span></div>
+        
+        {/* Container com largura fixa para evitar movimento dos elementos */}
+        <div className="flex gap-2 bg-black/40 px-3 py-1 rounded border border-zinc-800 shrink-0 tabular-nums">
+          <div className="w-20">
+            <span className="text-[7px] text-zinc-500 block leading-none">DELTA</span>
+            <span className="text-neon-yellow text-xs font-black">{delayInfo.ms.toFixed(2)}ms</span>
+          </div>
+          <div className="w-20 border-l border-zinc-800 pl-2">
+            <span className="text-[7px] text-zinc-500 block leading-none">DIST</span>
+            <span className="text-neon-blue text-xs font-black">{delayInfo.m.toFixed(2)}m</span>
+          </div>
         </div>
+
         <div className="flex gap-1 ml-auto shrink-0">
-          <select value={timeWindow} onChange={(e)=>setTimeWindow(parseInt(e.target.value))} className="bg-zinc-900 text-[10px] text-white p-1 rounded border border-zinc-800">
+          <select value={timeWindow} onChange={(e)=>setTimeWindow(parseInt(e.target.value))} className="bg-zinc-900 text-[10px] text-white p-1 rounded border border-zinc-800 outline-none">
             {[2, 4, 6, 8].map(t => <option key={t} value={t}>{t}s</option>)}
           </select>
-          <button onClick={() => { if(!isFrozen) setFrozenData(getCircularBufferSlice(getSampleRate() * timeWindow)); setIsFrozen(!isFrozen); }} className={`p-2 rounded border ${isFrozen ? 'bg-cyan-500 border-cyan-500 text-black' : 'border-zinc-800 text-zinc-400'}`}><Snowflake size={14}/></button>
+          <button onClick={() => { if(!isFrozen) setFrozenData(getCircularBufferSlice(getSampleRate() * timeWindow)); setIsFrozen(!isFrozen); }} className={`p-2 rounded border ${isFrozen ? 'bg-cyan-500 border-cyan-500 text-black shadow-[0_0_10px_#00ffff]' : 'border-zinc-800 text-zinc-400'}`}><Snowflake size={14}/></button>
           <button onClick={()=>setMarkers([])} className="p-2 rounded border border-zinc-800 text-zinc-400"><RotateCcw size={14}/></button>
-          <button onClick={togglePulse} className={`px-3 py-1 rounded border text-[9px] font-black ${isPulseRunning ? 'bg-red-500 text-white' : 'text-neon-blue border-neon-blue'}`}>{isPulseRunning ? 'STOP' : 'PULSE'}</button>
+          <button onClick={togglePulse} className={`px-3 py-1 rounded border text-[9px] font-black transition-all ${isPulseRunning ? 'bg-red-500 text-white border-red-500' : 'text-neon-blue border-neon-blue'}`}>{isPulseRunning ? 'STOP' : 'PULSE'}</button>
         </div>
       </div>
+
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-10 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900">
-          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} />
+        <div className="w-10 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900 shrink-0">
+          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500 appearance-none bg-zinc-900 w-1 rounded-full" style={{ appearance: 'slider-vertical' }} />
         </div>
         <canvas ref={canvasRef} className="flex-1 bg-black" />
       </div>
