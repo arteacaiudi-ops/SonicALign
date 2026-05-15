@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect } from 'react';
 import { ISO_31_BANDS } from '@/lib/app-params';
+import { useCalibration } from '@/hooks/use-calibration';
 
 const AudioEngineContext = createContext(null);
 export const useAudioEngine = () => useContext(AudioEngineContext);
@@ -7,12 +8,11 @@ export const useAudioEngine = () => useContext(AudioEngineContext);
 const SAMPLE_RATE = 48000;
 
 export function AudioEngineProvider({ children }) {
+  const calibration = useCalibration(); // Centralizador
   const [isRunning, setIsRunning] = useState(false);
   const [inputDevices, setInputDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('default');
   const [inputGain, setInputGain] = useState(1.0);
-  const [splOffset, setSplOffset] = useState(0);
-  const [rtaComp, setRtaComp] = useState(new Array(31).fill(0));
   const [batterySave, setBatterySave] = useState(true);
   const [invertPolarity, setInvertPolarity] = useState(false);
 
@@ -70,15 +70,38 @@ export function AudioEngineProvider({ children }) {
     } catch (err) { console.error(err); }
   }, [isRunning, inputGain]);
 
-  const get31BandData = useCallback(() => {
+  const get31BandData = useCallback((raw = false) => {
     if (!analyserRef.current) return null;
     const freqData = new Float32Array(analyserRef.current.frequencyBinCount);
     analyserRef.current.getFloatFrequencyData(freqData);
-    return ISO_31_BANDS.map((freq) => {
+    
+    const rawBands = ISO_31_BANDS.map((freq) => {
       const bin = Math.round(freq / (SAMPLE_RATE / analyserRef.current.fftSize));
       return freqData[bin] || -100;
     });
-  }, []);
+
+    return raw ? rawBands : calibration.applyCompensatedData(rawBands);
+  }, [calibration]);
+
+  const peakHoldAutoGain = useCallback(async (durationMs = 5000) => {
+    if (!isRunning) return;
+    let maxPeak = 0;
+    const startT = Date.now();
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        const samples = circularBufferRef.current.slice(-SAMPLE_RATE);
+        for(let s of samples) if(Math.abs(s) > maxPeak) maxPeak = Math.abs(s);
+        if (Date.now() - startT > durationMs) {
+          clearInterval(check);
+          const target = 0.25;
+          const newGain = Math.max(0.1, Math.min(10, (target / (maxPeak || 0.01)) * inputGain));
+          setInputGain(newGain);
+          circularBufferRef.current.fill(0);
+          resolve(newGain);
+        }
+      }, 100);
+    });
+  }, [isRunning, inputGain]);
 
   const playReferenceSignal = useCallback(async (type) => {
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -106,11 +129,11 @@ export function AudioEngineProvider({ children }) {
       const now = ctx.currentTime;
       const sOsc = ctx.createOscillator();
       const sG = ctx.createGain();
-      sOsc.frequency.setTargetAtTime(20000, now + 0.8, 1.5);
-      sG.gain.setValueAtTime(0, now+0.8); sG.gain.linearRampToValueAtTime(0.7, now+1.0);
-      sG.gain.setValueAtTime(0.7, now+5.8); sG.gain.linearRampToValueAtTime(0, now+6.0);
+      sOsc.frequency.setTargetAtTime(20000, now + 0.5, 1.5);
+      sG.gain.setValueAtTime(0, now+0.5); sG.gain.linearRampToValueAtTime(0.7, now+0.7);
+      sG.gain.setValueAtTime(0.7, now+5.5); sG.gain.linearRampToValueAtTime(0, now+5.7);
       sOsc.connect(sG); sG.connect(ctx.destination);
-      sOsc.start(now+0.8); sOsc.stop(now+6.0);
+      sOsc.start(now+0.5); sOsc.stop(now+5.7);
       activeSignalRef.current = { stop: () => sOsc.stop() };
     }
     return activeSignalRef.current;
@@ -122,8 +145,9 @@ export function AudioEngineProvider({ children }) {
 
   return (
     <AudioEngineContext.Provider value={{
-      isRunning, inputGain, setInputGain, splOffset, setSplOffset, rtaComp, setRtaComp, batterySave, setBatterySave, invertPolarity, setInvertPolarity,
-      inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal, get31BandData,
+      isRunning, inputGain, setInputGain, batterySave, setBatterySave, invertPolarity, setInvertPolarity,
+      inputDevices, selectedDevice, setSelectedDevice, start, stop, playReferenceSignal, get31BandData, peakHoldAutoGain,
+      calibration, // Expondo o cérebro da calibração
       getCircularBufferSlice: (count) => {
         if (!circularBufferRef.current) return null;
         const buf = circularBufferRef.current; const idx = bufferWriteIdxRef.current;
