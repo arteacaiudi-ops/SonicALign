@@ -6,7 +6,6 @@ export function useCalibration() {
   const [splOffset, setSplOffset] = useState(0);
   const [rtaComp, setRtaComp] = useState(new Array(31).fill(0));
 
-  // Carregar dados salvos ao iniciar
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -16,7 +15,6 @@ export function useCalibration() {
     }
   }, []);
 
-  // Salvar sempre que houver alteração
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ splOffset, rtaComp }));
   }, [splOffset, rtaComp]);
@@ -35,13 +33,5 @@ export function useCalibration() {
     setRtaComp(new Array(31).fill(0));
   };
 
-  return {
-    splOffset,
-    setSplOffset,
-    rtaComp,
-    setRtaComp,
-    applyCompensatedData,
-    getCompensatedSpl,
-    resetCalibration
-  };
+  return { splOffset, setSplOffset, rtaComp, setRtaComp, applyCompensatedData, getCompensatedSpl, resetCalibration };
 }
