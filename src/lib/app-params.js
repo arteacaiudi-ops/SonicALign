@@ -2,12 +2,10 @@ const isNode = typeof window === 'undefined';
 const windowObj = isNode ? { localStorage: new Map() } : window;
 const storage = windowObj.localStorage;
 
-// Versão da Aplicação
 export const APP_VERSION = "1.0.3";
 
-// Curvas de Referência para o RTA
 export const TARGET_CURVES = {
-  FLAT: { label: "FLAT", points: [[20, 0], [20000, 0]] },
+  FLAT: { label: "FLAT (0dB)", points: [[20, 0], [20000, 0]] },
   LIVE: { label: "LIVE CONCERT", points: [[20, 6], [100, 6], [1000, 0], [10000, -3], [20000, -6]] },
   CLUB: { label: "DJ / CLUB", points: [[20, 9], [80, 9], [1000, 0], [20000, 0]] },
   SPEECH: { label: "SPEECH PRO", points: [[20, -20], [100, 0], [3000, 3], [12000, -6]] },
@@ -16,7 +14,6 @@ export const TARGET_CURVES = {
 
 export const DEFAULT_TEMP = 25;
 
-// Lógica de Parâmetros do Sistema (Necessária para o base44Client)
 const toSnakeCase = (str) => str.replace(/([A-Z])/g, '_$1').toLowerCase();
 
 const getAppParamValue = (paramName, { defaultValue = undefined, removeFromUrl = false } = {}) => {
@@ -36,10 +33,6 @@ const getAppParamValue = (paramName, { defaultValue = undefined, removeFromUrl =
 }
 
 const getAppParams = () => {
-	if (getAppParamValue("clear_access_token") === 'true') {
-		storage.removeItem('base44_access_token');
-		storage.removeItem('token');
-	}
 	return {
 		appId: getAppParamValue("app_id", { defaultValue: import.meta.env.VITE_BASE44_APP_ID }),
 		token: getAppParamValue("access_token", { removeFromUrl: true }),
