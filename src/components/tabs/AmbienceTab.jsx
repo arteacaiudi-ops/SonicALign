@@ -36,7 +36,7 @@ export default function AmbienceTab() {
     for (let i = pulseIdx + fiftyMs; i < samples.length; i++) late += samples[i] ** 2;
     
     const c50 = 10 * Math.log10(early / (late || 0.0001));
-    const rt60 = 0.8 + (late * 15); // Algoritmo de decaimento estimado
+    const rt60 = 0.8 + (late * 15); 
 
     setMetrics({ c50, rt60 });
     if (rt60 > 1.5) setShowEqModal(true);
@@ -77,7 +77,7 @@ export default function AmbienceTab() {
       </div>
 
       {showEqModal && (
-        <div className="panel p-5 bg-zinc-900 border-2 border-neon-blue rounded-xl animate-in zoom-in-95 duration-300">
+        <div className="panel p-5 bg-zinc-900 border-2 border-neon-blue rounded-xl">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-neon-blue text-xs font-bold flex items-center gap-2 italic uppercase">
               <Activity size={14}/> Sugestão de EQ (Para XR18)
@@ -103,9 +103,6 @@ export default function AmbienceTab() {
                 <span className="text-zinc-500">{row.q}</span>
               </div>
             ))}
-          </div>
-          <div className="mt-4 flex gap-2 items-center text-[9px] text-zinc-500 bg-black/30 p-2 rounded">
-            <AlertCircle size={12}/> Correção sugerida para reduzir o "embolado" da sala.
           </div>
         </div>
       )}
