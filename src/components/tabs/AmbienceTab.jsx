@@ -4,7 +4,7 @@ import RollingGraph from '../audio/RollingGraph';
 import { Play, LayoutGrid, TrendingDown, BarChart3, Waves, SlidersHorizontal, Activity, AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function AmbienceTab() {
-  const { playReferenceSignal, getCircularBufferSlice, getSampleRate, isRunning, start, stop, selectedDevice } = useAudioEngine();
+  const { playReferenceSignal, getCircularBufferSlice, getSampleRate, get31BandData, isRunning, start, stop, selectedDevice } = useAudioEngine();
   const [activeView, setActiveView] = useState('summary');
   const [metrics, setMetrics] = useState({ rt60: null, c50: null });
   const [sweepState, setSweepState] = useState('idle'); 
@@ -12,7 +12,7 @@ export default function AmbienceTab() {
   const [liveData, setLiveData] = useState(new Float32Array(0));
   
   const timerRef = useRef(null);
-  const isTriggeredRef = useRef(false); // Flag blindada contra re-renderizações
+  const isTriggeredRef = useRef(false); // Bloqueio contra re-renderizações do React
 
   const VIEWS = [
     { id: 'summary', label: 'Resumo', icon: LayoutGrid },
@@ -25,7 +25,7 @@ export default function AmbienceTab() {
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
     
-    // VALIDAÇÃO PÓS-GRAVAÇÃO
+    // VALIDAÇÃO PÓS-GRAVAÇÃO DA SAÚDE DO SINAL
     let maxPeak = 0;
     for (let i = 0; i < samples.length; i++) {
       const absVal = Math.abs(samples[i]);
@@ -40,30 +40,25 @@ export default function AmbienceTab() {
     }
 
     if (maxPeak > 0.97) {
-      setErrorMsg("Sinal distorcido ou saturado. Reduza o ganho e repita.");
+      setErrorMsg("Sinal distorcido ou saturado (Clipping). Reduza o ganho e repita.");
       setSweepState('error_high');
       stop();
       return;
     }
 
-    const dynamicThreshold = maxPeak * 0.5;
-    let sweepEndIdx = -1;
-    
-    for (let i = samples.length - Math.floor(sr * 0.1); i > sr; i--) {
-      if (Math.abs(samples[i]) > dynamicThreshold && Math.abs(samples[i+100] || 0) < dynamicThreshold * 0.3) {
-        sweepEndIdx = i; 
-        break;
-      }
-    }
-    
-    if (sweepEndIdx === -1) sweepEndIdx = samples.length - Math.floor(sr * 1.5);
+    // MATEMÁTICA ABSOLUTA: O Sweep dura 6.1s após o gatilho. 
+    // Como a nossa gravação esperou 6.5s após o gatilho e capturou 8s no total:
+    // O final cirúrgico do sweep no buffer encontra-se a 0.4s do final (6.5s - 6.1s).
+    const sweepEndIdx = samples.length - Math.floor(sr * 0.4);
 
     const fiftyMs = Math.floor(sr * 0.05);
     let early = 0, late = 0;
     
+    // Energia direta (Impulso)
     for (let i = sweepEndIdx - fiftyMs; i < sweepEndIdx + fiftyMs; i++) {
         if(samples[i]) early += samples[i] ** 2;
     }
+    // Energia reverberante (Cauda da sala)
     for (let i = sweepEndIdx + fiftyMs; i < sweepEndIdx + (sr * 1.5); i++) {
         if(samples[i]) late += samples[i] ** 2;
     }
@@ -88,7 +83,7 @@ export default function AmbienceTab() {
         setSweepState('listening');
         setMetrics({ rt60: null, c50: null });
         setErrorMsg('');
-        isTriggeredRef.current = false; // Reset da flag ao reiniciar a escuta
+        isTriggeredRef.current = false; 
       }
     } else {
       if (sweepState !== 'done' && !sweepState.startsWith('error')) {
@@ -103,24 +98,24 @@ export default function AmbienceTab() {
       const samples = getCircularBufferSlice(getSampleRate() * 8); 
       if (samples) setLiveData(samples);
 
-      // SÓ ANALISA O GATILHO SE ESTIVER EM MODO 'LISTENING' E AINDA NÃO TIVER DISPARADO
+      // GATILHO POR ANALISADOR DE FREQUÊNCIA (FFT 1kHz)
       if (sweepState === 'listening' && !isTriggeredRef.current) {
-        const recentSamples = getCircularBufferSlice(getSampleRate());
-        if (recentSamples) {
-          let triggered = false;
-          for (let i = 0; i < recentSamples.length; i++) {
-            if (Math.abs(recentSamples[i]) > 0.03) { triggered = true; break; }
-          }
-          
-          if (triggered) {
-            // BLOQUEIO ABSOLUTO DO GATILHO PARA EVITAR LOOPS
-            isTriggeredRef.current = true;
+        const freqData = get31BandData(true); // Dados BRUTOS, sem compensação RTA
+        if (freqData) {
+          // freqData[17] corresponde à banda ISO exata de 1000Hz (1kHz)
+          const hz1000 = freqData[17]; 
+          // O ruído de fundo é estimado olhando para frequências distantes (ex: 400Hz e 2500Hz)
+          const bgNoise = (freqData[13] + freqData[21]) / 2; 
+
+          // Dispara APENAS se os 1kHz baterem acima de -45dB E destacarem-se 15dB acima do ruído da sala
+          if (hz1000 > -45 && hz1000 > bgNoise + 15) {
+            
+            isTriggeredRef.current = true; // Bloqueio hermético do estado
             setSweepState('recording');
             
-            // Inicia a gravação blindada de 6.5s
             if(timerRef.current) clearTimeout(timerRef.current);
+            // Temporizador blindado de 6.5s (Tempo do Sweep + Margem Acústica)
             timerRef.current = setTimeout(() => {
-               // Verifica se ainda está a rodar e no estado de gravação para não processar após um clique em "Parar"
                if (isRunning && isTriggeredRef.current) {
                   const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
                   processAcoustics(finalSamples);
@@ -129,13 +124,13 @@ export default function AmbienceTab() {
           }
         }
       }
-    }, 150);
+    }, 100);
 
     return () => {
         clearInterval(interval);
         if(timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, processAcoustics]);
+  }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, get31BandData, processAcoustics]);
 
   return (
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
