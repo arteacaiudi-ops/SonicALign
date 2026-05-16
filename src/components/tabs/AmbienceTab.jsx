@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAudioEngine } from '@/components/audio/AudioEngine';
 import RollingGraph from '../audio/RollingGraph';
-import { Play, Square, LayoutGrid, TrendingDown, BarChart3, Waves, SlidersHorizontal, Activity, Crosshair, AlertCircle, CheckCircle } from 'lucide-react';
+import { Play, LayoutGrid, TrendingDown, BarChart3, Waves, SlidersHorizontal, Activity, AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function AmbienceTab() {
-  const { playReferenceSignal, getCircularBufferSlice, getSampleRate, isRunning, start, stop, selectedDevice, peakHoldAutoGain } = useAudioEngine();
+  const { playReferenceSignal, getCircularBufferSlice, getSampleRate, isRunning, start, stop, selectedDevice } = useAudioEngine();
   const [activeView, setActiveView] = useState('summary');
   const [threshold, setThreshold] = useState(0.25);
   const [metrics, setMetrics] = useState({ rt60: null, c50: null });
-  const [sweepState, setSweepState] = useState('idle'); 
+  const [sweepState, setSweepState] = useState('idle'); // idle, listening, recording, done
   const [liveData, setLiveData] = useState(new Float32Array(0));
-  const [isCalibrating, setIsCalibrating] = useState(false);
   const timerRef = useRef(null);
 
   const VIEWS = [
@@ -21,19 +20,15 @@ export default function AmbienceTab() {
     { id: 'eq', label: 'Correção EQ', icon: SlidersHorizontal },
   ];
 
-  const handleAutoGain = async () => {
-    setIsCalibrating(true);
-    await peakHoldAutoGain(5000);
-    setIsCalibrating(false);
-  };
-
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
-    // Procura o fim do sweep
     let sweepEndIdx = -1;
+    
+    // Procura o final do sweep de trás para frente no buffer capturado
     for (let i = samples.length - Math.floor(sr * 0.1); i > sr; i--) {
       if (Math.abs(samples[i]) > threshold * 0.6 && Math.abs(samples[i+100] || 0) < threshold * 0.2) {
-        sweepEndIdx = i; break;
+        sweepEndIdx = i; 
+        break;
       }
     }
     
@@ -54,31 +49,51 @@ export default function AmbienceTab() {
         c50: 10 * Math.log10(early / (late || 0.00001)), 
         rt60: 0.3 + (late / early) * 12 
       });
-      setSweepState('done');
-      stop(); 
+    } else {
+      setMetrics({ c50: 0, rt60: 0 });
     }
+    
+    // ENCERRAMENTO FORÇADO E SEGURO DO LOOP DE LEITURA
+    setSweepState('done');
+    stop(); 
   }, [getSampleRate, threshold, stop]);
+
+  // Sincroniza o estado do ciclo de vida do sweep com o clique em Iniciar Análise
+  useEffect(() => {
+    if (isRunning) {
+      if (sweepState === 'idle' || sweepState === 'done') {
+        setSweepState('listening');
+        setMetrics({ rt60: null, c50: null });
+      }
+    } else {
+      if (sweepState !== 'done') {
+        setSweepState('idle');
+      }
+    }
+  }, [isRunning]);
 
   useEffect(() => {
     if (!isRunning) return;
     const interval = setInterval(() => {
       const samples = getCircularBufferSlice(getSampleRate() * 8); 
-      setLiveData(samples);
+      if (samples) setLiveData(samples);
 
       if (sweepState === 'listening') {
         const recentSamples = getCircularBufferSlice(getSampleRate());
-        let triggered = false;
-        for (let i = 0; i < recentSamples.length; i++) {
-          if (Math.abs(recentSamples[i]) > threshold) { triggered = true; break; }
-        }
-        
-        if (triggered) {
-          setSweepState('recording');
-          // Espera 6.5s ininterruptos após o bip (5s de Sweep + 1.5s Margem Reflexos)
-          timerRef.current = setTimeout(() => {
-             const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
-             processAcoustics(finalSamples);
-          }, 6500); 
+        if (recentSamples) {
+          let triggered = false;
+          for (let i = 0; i < recentSamples.length; i++) {
+            if (Math.abs(recentSamples[i]) > threshold) { triggered = true; break; }
+          }
+          
+          if (triggered) {
+            setSweepState('recording');
+            // Aguarda rigorosamente os 6.5s (5s de sweep + 1.5s de margem de reflexos)
+            timerRef.current = setTimeout(() => {
+               const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
+               processAcoustics(finalSamples);
+            }, 6500); 
+          }
         }
       }
     }, 150);
@@ -89,20 +104,23 @@ export default function AmbienceTab() {
     };
   }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, processAcoustics, threshold]);
 
-  const toggleListening = () => {
-      if (sweepState === 'listening' || sweepState === 'recording') {
-          setSweepState('idle');
-          if(timerRef.current) clearTimeout(timerRef.current);
-      } else {
-          setSweepState('listening');
-          setMetrics({ rt60: null, c50: null });
-      }
-  };
-
   return (
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
       <div className="flex bg-zinc-950 border-b border-zinc-900 overflow-x-auto no-scrollbar px-1 py-1 gap-1 shrink-0">
-        <button onClick={() => { setSweepState('idle'); isRunning ? stop() : start(selectedDevice); }} className={`w-24 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}>
+        <button 
+          onClick={() => { 
+            if (isRunning) {
+              setSweepState('idle');
+              if(timerRef.current) clearTimeout(timerRef.current);
+              stop();
+            } else {
+              setMetrics({ rt60: null, c50: null });
+              setSweepState('listening');
+              start(selectedDevice);
+            }
+          }} 
+          className={`w-28 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}
+        >
           {isRunning ? 'PARAR' : 'INICIAR ANÁLISE'}
         </button>
         {VIEWS.map(v => (
@@ -113,20 +131,20 @@ export default function AmbienceTab() {
       {sweepState === 'listening' && (
         <div className="bg-neon-blue/20 p-3 flex items-center gap-3 animate-pulse border-b border-neon-blue/30">
           <AlertCircle className="text-neon-blue" size={20}/>
-          <div className="text-[10px] text-white font-bold leading-tight">AGUARDANDO SINAL...<br/>DISPARE O SWEEP E NÃO MOVA O DISPOSITIVO.</div>
+          <div className="text-[10px] text-white font-bold leading-tight">AGUARDANDO SINAL...<br/>DISPARE O SWEEP E MANTENHA O DISPOSITIVO ESTÁTICO.</div>
         </div>
       )}
       
       {sweepState === 'recording' && (
         <div className="bg-red-500/20 p-3 flex items-center gap-3 animate-pulse border-b border-red-500/30">
           <Activity className="text-red-500" size={20}/>
-          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP (6.5s)...<br/>CAPTURANDO REFLEXOS. AGUARDE.</div>
+          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP (6.5s)...<br/>ANALISANDO REVERBERAÇÃO E REFLEXOS DA SALA.</div>
         </div>
       )}
 
       {sweepState === 'done' && (
         <div className="bg-neon-green/20 p-2 flex items-center gap-2 border-b border-neon-green/30 text-[10px] text-neon-green font-black">
-            <CheckCircle size={14}/> LEITURA COMPLETA REGISTRADA.
+            <CheckCircle size={14}/> ANÁLISE CONCLUÍDA E CONGELADA.
         </div>
       )}
 
@@ -140,16 +158,17 @@ export default function AmbienceTab() {
               <RollingGraph data={liveData} threshold={threshold} color="#0088ff" />
           </div>
 
-          <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl flex justify-between items-center shrink-0">
-             <button onClick={handleAutoGain} className={`p-2 rounded border border-zinc-800 ${isCalibrating ? 'text-neon-blue animate-spin' : 'text-zinc-400'}`} disabled={sweepState === 'recording'}><Crosshair size={14}/></button>
+          <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl flex justify-between items-center shrink-0 gap-4">
+             <div className="text-[8px] text-zinc-500 uppercase font-black flex-1 leading-tight tracking-wider">
+               Caso o volume fique inadequado, ajuste o ganho de entrada pelas guias RTA ou Time.
+             </div>
              <button 
-                onClick={toggleListening} 
-                className={`px-4 py-2 rounded-lg font-black text-[9px] border transition-all ${(sweepState === 'listening' || sweepState === 'recording') ? 'bg-neon-green text-black border-neon-green' : 'border-neon-blue text-neon-blue'}`}
+                onClick={() => playReferenceSignal('sweep')} 
+                className="px-4 py-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white active:bg-zinc-800 shrink-0" 
                 disabled={sweepState === 'recording'}
              >
-                {(sweepState === 'listening' || sweepState === 'recording') ? 'CANCELAR' : 'AGUARDAR SINAL'}
+                EMITIR SINAL (5s)
              </button>
-             <button onClick={() => playReferenceSignal('sweep')} className="p-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white" disabled={sweepState === 'recording'}><Play size={10} className="inline mr-1"/> SINAL</button>
           </div>
 
           {activeView === 'summary' && (
@@ -164,6 +183,10 @@ export default function AmbienceTab() {
                </div>
             </div>
           )}
+          {activeView === 'etc' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo ETC (Breve)</div>}
+          {activeView === 'bands' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Oitavas (Breve)</div>}
+          {activeView === 'waterfall' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Waterfall (Breve)</div>}
+          {activeView === 'eq' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Correção EQ (Breve)</div>}
         </div>
       </div>
     </div>
