@@ -6,9 +6,9 @@ import { Play, LayoutGrid, TrendingDown, BarChart3, Waves, SlidersHorizontal, Ac
 export default function AmbienceTab() {
   const { playReferenceSignal, getCircularBufferSlice, getSampleRate, isRunning, start, stop, selectedDevice } = useAudioEngine();
   const [activeView, setActiveView] = useState('summary');
-  const [threshold, setThreshold] = useState(0.25);
   const [metrics, setMetrics] = useState({ rt60: null, c50: null });
-  const [sweepState, setSweepState] = useState('idle'); // idle, listening, recording, done
+  const [sweepState, setSweepState] = useState('idle'); // idle, listening, recording, done, error_low, error_high
+  const [errorMsg, setErrorMsg] = useState('');
   const [liveData, setLiveData] = useState(new Float32Array(0));
   const timerRef = useRef(null);
 
@@ -22,11 +22,34 @@ export default function AmbienceTab() {
 
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
+    
+    // VALIDAÇÃO DE VOLUME PÓS-GRAVAÇÃO (POST-FACTO)
+    let maxPeak = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const absVal = Math.abs(samples[i]);
+      if (absVal > maxPeak) maxPeak = absVal;
+    }
+
+    if (maxPeak < 0.05) {
+      setErrorMsg("Volume muito baixo para análise de precisão. Por favor, aumente o ganho nas abas RTA/Time e repita o Sweep.");
+      setSweepState('error_low');
+      stop();
+      return;
+    }
+
+    if (maxPeak > 0.97) {
+      setErrorMsg("Sinal distorcido ou saturado (Clipping). Por favor, reduza o ganho nas abas RTA/Time e repita o Sweep.");
+      setSweepState('error_high');
+      stop();
+      return;
+    }
+
+    // Limiar dinâmico e inteligente baseado no pico real capturado
+    const dynamicThreshold = maxPeak * 0.5;
     let sweepEndIdx = -1;
     
-    // Procura o final do sweep de trás para frente no buffer capturado
     for (let i = samples.length - Math.floor(sr * 0.1); i > sr; i--) {
-      if (Math.abs(samples[i]) > threshold * 0.6 && Math.abs(samples[i+100] || 0) < threshold * 0.2) {
+      if (Math.abs(samples[i]) > dynamicThreshold && Math.abs(samples[i+100] || 0) < dynamicThreshold * 0.3) {
         sweepEndIdx = i; 
         break;
       }
@@ -49,24 +72,24 @@ export default function AmbienceTab() {
         c50: 10 * Math.log10(early / (late || 0.00001)), 
         rt60: 0.3 + (late / early) * 12 
       });
+      setSweepState('done');
     } else {
       setMetrics({ c50: 0, rt60: 0 });
+      setSweepState('done');
     }
     
-    // ENCERRAMENTO FORÇADO E SEGURO DO LOOP DE LEITURA
-    setSweepState('done');
     stop(); 
-  }, [getSampleRate, threshold, stop]);
+  }, [getSampleRate, stop]);
 
-  // Sincroniza o estado do ciclo de vida do sweep com o clique em Iniciar Análise
   useEffect(() => {
     if (isRunning) {
-      if (sweepState === 'idle' || sweepState === 'done') {
+      if (sweepState === 'idle' || sweepState === 'done' || sweepState.startsWith('error')) {
         setSweepState('listening');
         setMetrics({ rt60: null, c50: null });
+        setErrorMsg('');
       }
     } else {
-      if (sweepState !== 'done') {
+      if (sweepState !== 'done' && !sweepState.startsWith('error')) {
         setSweepState('idle');
       }
     }
@@ -82,13 +105,13 @@ export default function AmbienceTab() {
         const recentSamples = getCircularBufferSlice(getSampleRate());
         if (recentSamples) {
           let triggered = false;
+          // Trigger de segurança fixo baixo para acordar a escuta contínua
           for (let i = 0; i < recentSamples.length; i++) {
-            if (Math.abs(recentSamples[i]) > threshold) { triggered = true; break; }
+            if (Math.abs(recentSamples[i]) > 0.03) { triggered = true; break; }
           }
           
           if (triggered) {
             setSweepState('recording');
-            // Aguarda rigorosamente os 6.5s (5s de sweep + 1.5s de margem de reflexos)
             timerRef.current = setTimeout(() => {
                const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
                processAcoustics(finalSamples);
@@ -102,7 +125,7 @@ export default function AmbienceTab() {
         clearInterval(interval);
         if(timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, processAcoustics, threshold]);
+  }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, processAcoustics]);
 
   return (
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
@@ -115,6 +138,7 @@ export default function AmbienceTab() {
               stop();
             } else {
               setMetrics({ rt60: null, c50: null });
+              setErrorMsg('');
               setSweepState('listening');
               start(selectedDevice);
             }
@@ -131,63 +155,60 @@ export default function AmbienceTab() {
       {sweepState === 'listening' && (
         <div className="bg-neon-blue/20 p-3 flex items-center gap-3 animate-pulse border-b border-neon-blue/30">
           <AlertCircle className="text-neon-blue" size={20}/>
-          <div className="text-[10px] text-white font-bold leading-tight">AGUARDANDO SINAL...<br/>DISPARE O SWEEP E MANTENHA O DISPOSITIVO ESTÁTICO.</div>
+          <div className="text-[10px] text-white font-bold leading-tight">PRONTO PARA MEDIÇÃO...<br/>DISPARE O SWEEP E MANTENHA O TELEMÓVEL ESTÁTICO.</div>
         </div>
       )}
       
       {sweepState === 'recording' && (
         <div className="bg-red-500/20 p-3 flex items-center gap-3 animate-pulse border-b border-red-500/30">
           <Activity className="text-red-500" size={20}/>
-          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP (6.5s)...<br/>ANALISANDO REVERBERAÇÃO E REFLEXOS DA SALA.</div>
+          <div className="text-[10px] text-red-500 font-black leading-tight">GRAVANDO SWEEP (6.5s)...<br/>CAPTURANDO RESPOSTA DE SALA E CAUDA DE REVERBERAÇÃO.</div>
         </div>
       )}
 
       {sweepState === 'done' && (
         <div className="bg-neon-green/20 p-2 flex items-center gap-2 border-b border-neon-green/30 text-[10px] text-neon-green font-black">
-            <CheckCircle size={14}/> ANÁLISE CONCLUÍDA E CONGELADA.
+            <CheckCircle size={14}/> MEDIÇÃO CONCLUÍDA E TRAVADA COM SUCESSO.
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-7 bg-zinc-950 flex flex-col items-center py-4 border-r border-zinc-900 shrink-0">
-          <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e)=>setThreshold(parseFloat(e.target.value))} className="h-full accent-red-500" style={{ appearance: 'slider-vertical' }} disabled={sweepState === 'recording'}/>
+      {(sweepState === 'error_low' || sweepState === 'error_high') && (
+        <div className="bg-red-600/20 p-3 flex items-center gap-3 border-b border-red-500/40 text-[10px] text-red-500 font-black leading-tight">
+          <AlertCircle size={20} className="shrink-0"/>
+          <div>{errorMsg}</div>
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col p-2 gap-2 overflow-y-auto">
+        <div className="h-28 bg-zinc-950 border border-zinc-800 rounded-lg relative overflow-hidden shrink-0 shadow-inner">
+            <RollingGraph data={liveData} threshold={0.03} color="#0088ff" />
         </div>
 
-        <div className="flex-1 flex flex-col p-2 gap-2 overflow-y-auto">
-          <div className="h-28 bg-zinc-950 border border-zinc-800 rounded-lg relative overflow-hidden shrink-0 shadow-inner">
-              <RollingGraph data={liveData} threshold={threshold} color="#0088ff" />
-          </div>
+        <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl flex justify-between items-center shrink-0 gap-4">
+           <div className="text-[8px] text-zinc-500 uppercase font-black flex-1 leading-tight tracking-wider">
+             Caso o volume fique inadequado, faça o ajuste fino do ganho de entrada utilizando as guias RTA ou Time.
+           </div>
+           <button 
+              onClick={() => playReferenceSignal('sweep')} 
+              className="px-4 py-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white active:bg-zinc-800 shrink-0" 
+              disabled={sweepState === 'recording'}
+           >
+              EMITIR SWEEP (5s)
+           </button>
+        </div>
 
-          <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl flex justify-between items-center shrink-0 gap-4">
-             <div className="text-[8px] text-zinc-500 uppercase font-black flex-1 leading-tight tracking-wider">
-               Caso o volume fique inadequado, ajuste o ganho de entrada pelas guias RTA ou Time.
+        {activeView === 'summary' && (
+          <div className="grid grid-cols-1 gap-2 animate-in fade-in">
+             <div className="bg-zinc-900/40 p-5 rounded-xl border border-zinc-800 text-center">
+                <p className="text-[9px] text-zinc-500 mb-1 uppercase font-black flex justify-between">RT60 (Decaimento) <Activity size={10}/></p>
+                <p className="text-5xl font-black text-white">{metrics.rt60 ? metrics.rt60.toFixed(2) + 's' : '--'}</p>
              </div>
-             <button 
-                onClick={() => playReferenceSignal('sweep')} 
-                className="px-4 py-2 border border-zinc-800 text-zinc-400 rounded-lg bg-zinc-900 font-black text-[9px] hover:text-white active:bg-zinc-800 shrink-0" 
-                disabled={sweepState === 'recording'}
-             >
-                EMITIR SINAL (5s)
-             </button>
+             <div className="bg-zinc-900/40 p-5 rounded-xl border border-zinc-800 text-center">
+                <p className="text-[9px] text-zinc-500 mb-1 uppercase font-black flex justify-between">C50 (Clareza) <Activity size={10}/></p>
+                <p className={`text-5xl font-black ${metrics.c50 > 0 ? 'text-neon-green' : 'text-neon-yellow'}`}>{metrics.c50 ? metrics.c50.toFixed(1) + 'dB' : '--'}</p>
+             </div>
           </div>
-
-          {activeView === 'summary' && (
-            <div className="grid grid-cols-1 gap-2 animate-in fade-in">
-               <div className="bg-zinc-900/40 p-5 rounded-xl border border-zinc-800 text-center">
-                  <p className="text-[9px] text-zinc-500 mb-1 uppercase font-black flex justify-between">RT60 (Decaimento) <Activity size={10}/></p>
-                  <p className="text-5xl font-black text-white">{metrics.rt60 ? metrics.rt60.toFixed(2) + 's' : '--'}</p>
-               </div>
-               <div className="bg-zinc-900/40 p-5 rounded-xl border border-zinc-800 text-center">
-                  <p className="text-[9px] text-zinc-500 mb-1 uppercase font-black flex justify-between">C50 (Clareza) <Activity size={10}/></p>
-                  <p className={`text-5xl font-black ${metrics.c50 > 0 ? 'text-neon-green' : 'text-neon-yellow'}`}>{metrics.c50 ? metrics.c50.toFixed(1) + 'dB' : '--'}</p>
-               </div>
-            </div>
-          )}
-          {activeView === 'etc' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo ETC (Breve)</div>}
-          {activeView === 'bands' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Oitavas (Breve)</div>}
-          {activeView === 'waterfall' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Waterfall (Breve)</div>}
-          {activeView === 'eq' && <div className="p-4 text-zinc-500 text-center text-xs">Módulo Correção EQ (Breve)</div>}
-        </div>
+        )}
       </div>
     </div>
   );
