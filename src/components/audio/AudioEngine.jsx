@@ -84,11 +84,15 @@ export function AudioEngineProvider({ children }) {
   }, [calibration]);
 
   const peakHoldAutoGain = useCallback(async (durationMs = 5000) => {
-    if (!isRunning) return;
+    // Liga mic se necessário para autogain
+    const wasRunning = isRunning;
+    if (!wasRunning) await start(selectedDevice);
+
     let maxPeak = 0;
     const startT = Date.now();
     return new Promise((resolve) => {
       const check = setInterval(() => {
+        if(!circularBufferRef.current) return;
         const samples = circularBufferRef.current.slice(-SAMPLE_RATE);
         for(let s of samples) if(Math.abs(s) > maxPeak) maxPeak = Math.abs(s);
         if (Date.now() - startT > durationMs) {
@@ -96,12 +100,13 @@ export function AudioEngineProvider({ children }) {
           const target = 0.25;
           const newGain = Math.max(0.1, Math.min(10, (target / (maxPeak || 0.01)) * inputGain));
           setInputGain(newGain);
-          circularBufferRef.current.fill(0);
+          if(circularBufferRef.current) circularBufferRef.current.fill(0);
+          if (!wasRunning) stop(); // Desliga se ligámos só para isto
           resolve(newGain);
         }
       }, 100);
     });
-  }, [isRunning, inputGain]);
+  }, [isRunning, inputGain, start, stop, selectedDevice]);
 
   const playReferenceSignal = useCallback(async (type) => {
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -143,19 +148,9 @@ export function AudioEngineProvider({ children }) {
       sOsc.connect(sG); sG.connect(ctx.destination);
       sOsc.start(now+0.9); sOsc.stop(now+6.1);
       activeSignalRef.current = { stop: () => sOsc.stop() };
-    } else {
-      const timer = setInterval(() => {
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(invertPolarity ? -0.8 : 0.8, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.02);
-        osc.connect(g); g.connect(ctx.destination);
-        osc.start(); osc.stop(ctx.currentTime + 0.02);
-      }, 1000);
-      activeSignalRef.current = { stop: () => clearInterval(timer) };
     }
     return activeSignalRef.current;
-  }, [invertPolarity]);
+  }, []);
 
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices().then(devices => setInputDevices(devices.filter(d => d.kind === 'audioinput')));
