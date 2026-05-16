@@ -7,10 +7,12 @@ export default function AmbienceTab() {
   const { playReferenceSignal, getCircularBufferSlice, getSampleRate, isRunning, start, stop, selectedDevice } = useAudioEngine();
   const [activeView, setActiveView] = useState('summary');
   const [metrics, setMetrics] = useState({ rt60: null, c50: null });
-  const [sweepState, setSweepState] = useState('idle'); // idle, listening, recording, done, error_low, error_high
+  const [sweepState, setSweepState] = useState('idle'); 
   const [errorMsg, setErrorMsg] = useState('');
   const [liveData, setLiveData] = useState(new Float32Array(0));
+  
   const timerRef = useRef(null);
+  const isTriggeredRef = useRef(false); // Flag blindada contra re-renderizações
 
   const VIEWS = [
     { id: 'summary', label: 'Resumo', icon: LayoutGrid },
@@ -23,7 +25,7 @@ export default function AmbienceTab() {
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
     
-    // VALIDAÇÃO DE VOLUME PÓS-GRAVAÇÃO (POST-FACTO)
+    // VALIDAÇÃO PÓS-GRAVAÇÃO
     let maxPeak = 0;
     for (let i = 0; i < samples.length; i++) {
       const absVal = Math.abs(samples[i]);
@@ -31,20 +33,19 @@ export default function AmbienceTab() {
     }
 
     if (maxPeak < 0.05) {
-      setErrorMsg("Volume muito baixo para análise de precisão. Por favor, aumente o ganho nas abas RTA/Time e repita o Sweep.");
+      setErrorMsg("Volume muito baixo para análise de precisão. Ajuste o ganho e repita.");
       setSweepState('error_low');
       stop();
       return;
     }
 
     if (maxPeak > 0.97) {
-      setErrorMsg("Sinal distorcido ou saturado (Clipping). Por favor, reduza o ganho nas abas RTA/Time e repita o Sweep.");
+      setErrorMsg("Sinal distorcido ou saturado. Reduza o ganho e repita.");
       setSweepState('error_high');
       stop();
       return;
     }
 
-    // Limiar dinâmico e inteligente baseado no pico real capturado
     const dynamicThreshold = maxPeak * 0.5;
     let sweepEndIdx = -1;
     
@@ -87,6 +88,7 @@ export default function AmbienceTab() {
         setSweepState('listening');
         setMetrics({ rt60: null, c50: null });
         setErrorMsg('');
+        isTriggeredRef.current = false; // Reset da flag ao reiniciar a escuta
       }
     } else {
       if (sweepState !== 'done' && !sweepState.startsWith('error')) {
@@ -101,20 +103,28 @@ export default function AmbienceTab() {
       const samples = getCircularBufferSlice(getSampleRate() * 8); 
       if (samples) setLiveData(samples);
 
-      if (sweepState === 'listening') {
+      // SÓ ANALISA O GATILHO SE ESTIVER EM MODO 'LISTENING' E AINDA NÃO TIVER DISPARADO
+      if (sweepState === 'listening' && !isTriggeredRef.current) {
         const recentSamples = getCircularBufferSlice(getSampleRate());
         if (recentSamples) {
           let triggered = false;
-          // Trigger de segurança fixo baixo para acordar a escuta contínua
           for (let i = 0; i < recentSamples.length; i++) {
             if (Math.abs(recentSamples[i]) > 0.03) { triggered = true; break; }
           }
           
           if (triggered) {
+            // BLOQUEIO ABSOLUTO DO GATILHO PARA EVITAR LOOPS
+            isTriggeredRef.current = true;
             setSweepState('recording');
+            
+            // Inicia a gravação blindada de 6.5s
+            if(timerRef.current) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => {
-               const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
-               processAcoustics(finalSamples);
+               // Verifica se ainda está a rodar e no estado de gravação para não processar após um clique em "Parar"
+               if (isRunning && isTriggeredRef.current) {
+                  const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
+                  processAcoustics(finalSamples);
+               }
             }, 6500); 
           }
         }
@@ -134,12 +144,14 @@ export default function AmbienceTab() {
           onClick={() => { 
             if (isRunning) {
               setSweepState('idle');
+              isTriggeredRef.current = false;
               if(timerRef.current) clearTimeout(timerRef.current);
               stop();
             } else {
               setMetrics({ rt60: null, c50: null });
               setErrorMsg('');
               setSweepState('listening');
+              isTriggeredRef.current = false;
               start(selectedDevice);
             }
           }} 
@@ -155,7 +167,7 @@ export default function AmbienceTab() {
       {sweepState === 'listening' && (
         <div className="bg-neon-blue/20 p-3 flex items-center gap-3 animate-pulse border-b border-neon-blue/30">
           <AlertCircle className="text-neon-blue" size={20}/>
-          <div className="text-[10px] text-white font-bold leading-tight">PRONTO PARA MEDIÇÃO...<br/>DISPARE O SWEEP E MANTENHA O TELEMÓVEL ESTÁTICO.</div>
+          <div className="text-[10px] text-white font-bold leading-tight">PRONTO PARA MEDIÇÃO...<br/>DISPARE O SWEEP E MANTENHA O DISPOSITIVO ESTÁTICO.</div>
         </div>
       )}
       
