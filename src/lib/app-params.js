@@ -1,4 +1,8 @@
-export const APP_VERSION = "1.0.4 "; 
+// Importa o ficheiro version.json que está na raiz
+import versionData from '../../version.json';
+
+// Lê a versão dinamicamente
+export const APP_VERSION = versionData.version; 
 
 export const ISO_31_BANDS = [
   20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 
