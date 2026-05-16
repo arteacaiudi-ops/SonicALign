@@ -10,21 +10,21 @@ export default function SettingsTab() {
     batterySave, setBatterySave, invertPolarity, setInvertPolarity, start, stop, peakHoldAutoGain
   } = useAudioEngine();
 
-  const [calType, setCalType] = useState(null); // 'spl' ou 'rta'
+  const [calType, setCalType] = useState(null); 
   const [extSpl, setExtSpl] = useState(85);
   const [liveLevels, setLiveLevels] = useState(new Array(31).fill(-100));
   
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [calibProgress, setCalibProgress] = useState(0);
+  const [targetLevel, setTargetLevel] = useState(-40); // Linha amarela dinâmica (Padrão visual 50%)
 
-  // Buffer para Smoothing RTA
+  // Buffer para Smoothing RTA de 4 segundos
   const rawHistoryRef = useRef([]);
 
-  // Loop visual: Atualiza sempre (se modal aberto)
+  // Loop visual: Atualiza sempre que o modal está aberto
   useEffect(() => {
     if (!calType) return;
     
-    // Liga o microfone temporariamente se não estava rodando
     let tempStarted = false;
     const initMic = async () => {
         if (!isRunning) {
@@ -35,13 +35,13 @@ export default function SettingsTab() {
     initMic();
 
     const interval = setInterval(() => {
-      const data = get31BandData(false); // Sempre mostra COMPENSADO visualmente
+      const data = get31BandData(false); // Sempre mostra o COMPENSADO visualmente
       if (data) setLiveLevels(data);
     }, 50);
 
     return () => {
         clearInterval(interval);
-        if (tempStarted) stop(); // Desliga se ligou apenas para settings
+        if (tempStarted) stop(); 
     };
   }, [calType, isRunning, get31BandData, start, stop, selectedDevice]);
 
@@ -51,54 +51,53 @@ export default function SettingsTab() {
     setTimeout(() => pink.stop(), 8000);
   };
 
-  // --- NOVA MATEMÁTICA: INVERSÃO PELA MÉDIA (ALVO RELATIVO) ---
+  // --- MATEMÁTICA DE INVERSÃO (ALVO RELATIVO 4s) ---
   const runAutoCalibration = async () => {
     setIsAutoCalibrating(true);
     setCalibProgress(0);
     
-    // 1. Zera todos os faders para ter leitura limpa
+    // 1. Zera todos os faders para ter leitura limpa do hardware
     calibration.setRtaComp(new Array(31).fill(0));
     const pink = await playReferenceSignal('pink');
     
-    // 2. Ouve durante 2 segundos para encher o buffer de smoothing
+    // 2. Ouve durante 4 segundos (Smoothing)
     rawHistoryRef.current = [];
     const readInt = setInterval(() => {
-        const raw = get31BandData(true); // BRUTO
+        const raw = get31BandData(true); // Lê o sinal BRUTO sem a compensação antiga
         if(raw) rawHistoryRef.current.push(raw);
-        setCalibProgress(prev => prev + 5); // 0 a 100% de 2s = 5% a cada 100ms
+        setCalibProgress(prev => prev + 2.5); // 4s = 40 ticks de 100ms (100% / 40 = 2.5)
     }, 100);
 
     setTimeout(() => {
         clearInterval(readInt);
         pink.stop();
         
-        // 3. Processamento Matemático
+        // 3. Processamento e Cálculo
         const history = rawHistoryRef.current;
-        if(history.length === 0) { setIsAutoCalibrating(false); return alert("Erro: Sem leitura"); }
+        if(history.length === 0) { setIsAutoCalibrating(false); return alert("Erro: Sem leitura de áudio."); }
         
-        // Faz a média de cada banda
+        // Média individual de cada uma das 31 bandas
         const avgBands = new Array(31).fill(0);
         history.forEach(read => {
             read.forEach((val, i) => avgBands[i] += val);
         });
         for(let i=0; i<31; i++) avgBands[i] /= history.length;
 
-        // Encontra a "Linha Invisível" (Média Global do Espectro)
+        // "A Linha Invisível": Média Global do Espectro no ambiente atual
         const globalAvg = avgBands.reduce((a,b)=>a+b,0) / 31;
+        setTargetLevel(globalAvg); // Move a linha pontilhada amarela visualmente
         
-        // Calcula e aplica a inversão
+        // Calcula a inversão e aplica aos Faders
         const newComp = new Array(31).fill(0);
         for(let i=0; i<31; i++){
             const diff = globalAvg - avgBands[i]; 
-            // Inverte: se a banda tá 5dB abaixo da média, soma +5dB.
             newComp[i] = Math.max(-20, Math.min(20, diff));
         }
         
-        // Aplicação visual (os faders vão mexer todos juntos numa tacada suave graças ao CSS transition)
         calibration.setRtaComp(newComp);
         setIsAutoCalibrating(false);
         setCalibProgress(0);
-    }, 2000); // 2 segundos de captura intensiva
+    }, 4000); // 4 segundos cravados
   };
 
   const exportJSON = () => {
@@ -151,7 +150,7 @@ export default function SettingsTab() {
 
       <section className="p-4 border border-zinc-800 rounded-lg bg-zinc-950">
         <h3 className="text-neon-green mb-4 flex items-center gap-2 font-black uppercase"><Activity size={14}/> Calibração RTA (Referência)</h3>
-        <button onClick={() => setCalType('rta')} className="w-full p-4 bg-zinc-900 border border-zinc-800 text-zinc-300 font-bold rounded-lg uppercase">Abrir Equalizador de Calibração</button>
+        <button onClick={() => setCalType('rta')} className="w-full p-4 bg-zinc-900 border border-zinc-800 text-zinc-300 font-bold rounded-lg uppercase">Abrir Rack de Equalização</button>
       </section>
 
       <section className="grid grid-cols-1 gap-2">
@@ -165,21 +164,21 @@ export default function SettingsTab() {
         </button>
       </section>
 
-      {/* NOVO RACK UNIFICADO DE CALIBRAÇÃO (MANUAL + AUTO) */}
+      {/* RACK UNIFICADO DE CALIBRAÇÃO (MANUAL + AUTO) */}
       {calType === 'rta' && (
         <div className="fixed inset-0 bg-black z-50 flex flex-col p-2 animate-in slide-in-from-bottom duration-300">
-            {/* CABEÇALHO DO EQ */}
+            
             <div className="flex justify-between items-center p-2 border-b border-zinc-900 shrink-0 gap-2">
-                <span className="text-neon-green font-black uppercase text-[10px] hidden sm:block">Calibração Mic (31 Bandas)</span>
+                <span className="text-neon-green font-black uppercase text-[10px] hidden sm:block">Calibração de Hardware</span>
                 
                 <div className="flex gap-2 flex-1 justify-end">
                     <button 
                         onClick={async () => {
                             setIsAutoCalibrating(true);
-                            await peakHoldAutoGain(3000); // Usa o Mic temporário
+                            await peakHoldAutoGain(3000);
                             setIsAutoCalibrating(false);
                         }} 
-                        className="px-3 py-2 bg-zinc-900 text-neon-blue font-black rounded-lg text-[9px] border border-neon-blue flex items-center gap-1"
+                        className="px-3 py-2 bg-zinc-900 text-neon-blue font-black rounded-lg text-[9px] border border-neon-blue flex items-center gap-1 hover:bg-neon-blue/10"
                     >
                         <Crosshair size={12}/> AUTO-GAIN
                     </button>
@@ -187,25 +186,27 @@ export default function SettingsTab() {
                     <button 
                         onClick={runAutoCalibration} 
                         disabled={isAutoCalibrating}
-                        className={`px-3 py-2 font-black rounded-lg text-[9px] flex items-center gap-1 transition-all ${isAutoCalibrating ? 'bg-neon-green text-black' : 'bg-neon-green/20 text-neon-green border border-neon-green'}`}
+                        className={`px-3 py-2 font-black rounded-lg text-[9px] flex items-center gap-1 transition-all ${isAutoCalibrating ? 'bg-neon-green text-black' : 'bg-neon-green/20 text-neon-green border border-neon-green hover:bg-neon-green hover:text-black'}`}
                     >
-                        <Activity size={12}/> {isAutoCalibrating ? `${calibProgress}%` : 'CALIBRAR AUTO'}
+                        <Activity size={12}/> {isAutoCalibrating ? `${Math.round(calibProgress)}%` : 'CALIBRAR AUTO'}
                     </button>
                     
-                    <button onClick={() => { calibration.setRtaComp(new Array(31).fill(0)); setCalType(null); }} className="p-2 border border-red-900 text-red-500 rounded-lg text-[10px]" title="Sair sem salvar">
+                    <button onClick={() => { calibration.setRtaComp(new Array(31).fill(0)); setCalType(null); }} className="p-2 border border-red-900 text-red-500 rounded-lg text-[10px] hover:bg-red-900/20" title="Cancelar e Sair">
                         <X size={14}/>
                     </button>
                     
-                    <button onClick={() => setCalType(null)} className="px-3 py-2 bg-zinc-800 text-white font-black rounded-lg text-[9px]">
+                    <button onClick={() => setCalType(null)} className="px-3 py-2 bg-zinc-800 text-white font-black rounded-lg text-[9px] hover:bg-zinc-700">
                         SALVAR
                     </button>
                 </div>
             </div>
 
-            {/* CORPO DO EQ */}
             <div className="flex-1 flex overflow-x-auto gap-[2px] items-center px-4 bg-zinc-950 no-scrollbar relative pt-10">
-                {/* Linha Zero / Target Flat - Pontilhada Amarela */}
-                <div className="absolute left-0 right-0 h-[2px] border-b-2 border-dashed border-yellow-500 top-1/2 z-0 opacity-70"></div>
+                {/* Linha Amarela Dinâmica (Alvo Relativo) */}
+                <div 
+                  className="absolute left-0 right-0 h-[2px] border-b-2 border-dashed border-yellow-500 z-0 opacity-70 transition-all duration-1000 ease-in-out"
+                  style={{ bottom: `${Math.max(0, targetLevel + 90)}%` }}
+                ></div>
 
                 {ISO_31_BANDS.map((freq, i) => (
                     <div key={i} className="flex flex-col items-center min-w-[18px] h-[85%] relative">
@@ -216,7 +217,7 @@ export default function SettingsTab() {
                             ></div>
                         </div>
 
-                        {/* Fader Knob - Movimentação Suave e com Animação via CSS para o Auto-Align */}
+                        {/* Fader Manual (Com UX bloqueada contra cliques acidentais fora do Knob) */}
                         <div 
                             className={`absolute w-6 h-4 bg-white rounded-sm shadow-xl border-x-2 border-blue-500 z-10 flex items-center justify-center cursor-ns-resize touch-none active:scale-125 ${isAutoCalibrating ? 'transition-all duration-[2000ms] ease-out' : ''}`}
                             style={{ 
@@ -258,7 +259,7 @@ export default function SettingsTab() {
             
             {isAutoCalibrating && (
                 <div className="p-3 bg-neon-green text-black font-black text-center text-[10px] uppercase animate-pulse">
-                    Ouvindo Pink Noise... Calculando Inversão de Frequências ({calibProgress}%)
+                    Computando 40 amostras por banda (Smoothing 4s)... {calibProgress}%
                 </div>
             )}
         </div>
