@@ -12,7 +12,7 @@ export default function AmbienceTab() {
   const [liveData, setLiveData] = useState(new Float32Array(0));
   
   const timerRef = useRef(null);
-  const isTriggeredRef = useRef(false); // Bloqueio contra re-renderizações do React
+  const isTriggeredRef = useRef(false);
 
   const VIEWS = [
     { id: 'summary', label: 'Resumo', icon: LayoutGrid },
@@ -22,10 +22,17 @@ export default function AmbienceTab() {
     { id: 'eq', label: 'Correção EQ', icon: SlidersHorizontal },
   ];
 
+  // Garante que o temporizador seja limpo caso o utilizador mude de aba no meio do processo
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   const processAcoustics = useCallback((samples) => {
     const sr = getSampleRate();
     
-    // VALIDAÇÃO PÓS-GRAVAÇÃO DA SAÚDE DO SINAL
+    // VALIDAÇÃO DA SAÚDE DO SINAL
     let maxPeak = 0;
     for (let i = 0; i < samples.length; i++) {
       const absVal = Math.abs(samples[i]);
@@ -46,9 +53,8 @@ export default function AmbienceTab() {
       return;
     }
 
-    // MATEMÁTICA ABSOLUTA: O Sweep dura 6.1s após o gatilho. 
-    // Como a nossa gravação esperou 6.5s após o gatilho e capturou 8s no total:
-    // O final cirúrgico do sweep no buffer encontra-se a 0.4s do final (6.5s - 6.1s).
+    // CORTE MATEMÁTICO: Capturou 8s, esperou 6.5s após gatilho. Sweep dura 6.1s.
+    // Fim exato do sweep = final da gravação menos a margem de 0.4s.
     const sweepEndIdx = samples.length - Math.floor(sr * 0.4);
 
     const fiftyMs = Math.floor(sr * 0.05);
@@ -90,33 +96,31 @@ export default function AmbienceTab() {
         setSweepState('idle');
       }
     }
-  }, [isRunning]);
+  }, [isRunning]); // Removido sweepState daqui para evitar loop de estado
 
+  // MOTOR DE LEITURA (Desacoplado do temporizador)
   useEffect(() => {
     if (!isRunning) return;
+    
     const interval = setInterval(() => {
       const samples = getCircularBufferSlice(getSampleRate() * 8); 
       if (samples) setLiveData(samples);
 
-      // GATILHO POR ANALISADOR DE FREQUÊNCIA (FFT 1kHz)
+      // SÓ PROCURA O GATILHO SE ESTIVER PRONTO E AINDA NÃO DISPAROU
       if (sweepState === 'listening' && !isTriggeredRef.current) {
-        const freqData = get31BandData(true); // Dados BRUTOS, sem compensação RTA
+        const freqData = get31BandData(true); 
         if (freqData) {
-          // freqData[17] corresponde à banda ISO exata de 1000Hz (1kHz)
           const hz1000 = freqData[17]; 
-          // O ruído de fundo é estimado olhando para frequências distantes (ex: 400Hz e 2500Hz)
           const bgNoise = (freqData[13] + freqData[21]) / 2; 
 
-          // Dispara APENAS se os 1kHz baterem acima de -45dB E destacarem-se 15dB acima do ruído da sala
           if (hz1000 > -45 && hz1000 > bgNoise + 15) {
-            
-            isTriggeredRef.current = true; // Bloqueio hermético do estado
+            isTriggeredRef.current = true;
             setSweepState('recording');
             
-            if(timerRef.current) clearTimeout(timerRef.current);
-            // Temporizador blindado de 6.5s (Tempo do Sweep + Margem Acústica)
+            // O temporizador nasce aqui e fica cego para as re-renderizações visuais do React
             timerRef.current = setTimeout(() => {
-               if (isRunning && isTriggeredRef.current) {
+               // Apenas calcula se o utilizador não abortou a gravação
+               if (isTriggeredRef.current) {
                   const finalSamples = getCircularBufferSlice(getSampleRate() * 8);
                   processAcoustics(finalSamples);
                }
@@ -128,28 +132,30 @@ export default function AmbienceTab() {
 
     return () => {
         clearInterval(interval);
-        if(timerRef.current) clearTimeout(timerRef.current);
+        // ATENÇÃO: NÃO limpamos o timerRef.current aqui para não matar o processo de 6.5s!
     };
   }, [isRunning, sweepState, getCircularBufferSlice, getSampleRate, get31BandData, processAcoustics]);
+
+  const handleStartStop = () => {
+    if (isRunning) {
+      setSweepState('idle');
+      isTriggeredRef.current = false;
+      if(timerRef.current) clearTimeout(timerRef.current);
+      stop();
+    } else {
+      setMetrics({ rt60: null, c50: null });
+      setErrorMsg('');
+      setSweepState('listening');
+      isTriggeredRef.current = false;
+      start(selectedDevice);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-black font-mono overflow-hidden">
       <div className="flex bg-zinc-950 border-b border-zinc-900 overflow-x-auto no-scrollbar px-1 py-1 gap-1 shrink-0">
         <button 
-          onClick={() => { 
-            if (isRunning) {
-              setSweepState('idle');
-              isTriggeredRef.current = false;
-              if(timerRef.current) clearTimeout(timerRef.current);
-              stop();
-            } else {
-              setMetrics({ rt60: null, c50: null });
-              setErrorMsg('');
-              setSweepState('listening');
-              isTriggeredRef.current = false;
-              start(selectedDevice);
-            }
-          }} 
+          onClick={handleStartStop} 
           className={`w-28 px-1 py-2 my-1 rounded border font-black text-[9px] ${isRunning ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-neon-blue/10 border-neon-blue text-neon-blue'}`}
         >
           {isRunning ? 'PARAR' : 'INICIAR ANÁLISE'}
