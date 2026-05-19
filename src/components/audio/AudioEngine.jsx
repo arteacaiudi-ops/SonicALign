@@ -84,7 +84,6 @@ export function AudioEngineProvider({ children }) {
   }, [calibration]);
 
   const peakHoldAutoGain = useCallback(async (durationMs = 5000) => {
-    // Liga mic se necessário para autogain
     const wasRunning = isRunning;
     if (!wasRunning) await start(selectedDevice);
 
@@ -101,7 +100,7 @@ export function AudioEngineProvider({ children }) {
           const newGain = Math.max(0.1, Math.min(10, (target / (maxPeak || 0.01)) * inputGain));
           setInputGain(newGain);
           if(circularBufferRef.current) circularBufferRef.current.fill(0);
-          if (!wasRunning) stop(); // Desliga se ligámos só para isto
+          if (!wasRunning) stop(); 
           resolve(newGain);
         }
       }, 100);
@@ -114,7 +113,9 @@ export function AudioEngineProvider({ children }) {
     if (ctx.state === 'suspended') await ctx.resume();
     if (activeSignalRef.current?.stop) activeSignalRef.current.stop();
 
-    if (type === 'pink') {
+    if (type === 'stop') {
+      return null;
+    } else if (type === 'pink') {
       const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
       const data = buffer.getChannelData(0);
       let b0, b1, b2, b3, b4, b5, b6; b0=b1=b2=b3=b4=b5=b6=0;
@@ -130,6 +131,22 @@ export function AudioEngineProvider({ children }) {
       node.buffer = buffer; node.loop = true;
       node.connect(ctx.destination); node.start();
       activeSignalRef.current = { stop: () => { try{node.stop()}catch(e){} } };
+
+    } else if (type === 'click') {
+      // Impulso seco de 5ms que repete 1 vez por segundo
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 1, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      const clickSamples = Math.floor(ctx.sampleRate * 0.005); 
+      for (let i = 0; i < clickSamples; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.8;
+      }
+      const node = ctx.createBufferSource();
+      node.buffer = buffer; 
+      node.loop = true; 
+      node.connect(ctx.destination); 
+      node.start();
+      activeSignalRef.current = { stop: () => { try{node.stop()}catch(e){} } };
+
     } else if (type === 'sweep') {
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
