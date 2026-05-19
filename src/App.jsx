@@ -54,4 +54,12 @@ function App() {
   )
 }
 
+{isLogging && (
+  <button 
+    onClick={stopTelemetry} 
+    className="fixed bottom-20 right-4 z-[100] p-4 bg-red-600 text-white font-black rounded-full shadow-2xl animate-bounce"
+  >
+    PARAR LOG
+  </button>
+)}
 export default App
